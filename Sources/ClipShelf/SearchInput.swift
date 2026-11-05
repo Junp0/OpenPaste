@@ -20,8 +20,10 @@ import SwiftUI
     }
 
     func blur() {
-        guard let field, field.currentEditor() != nil else { return }
-        field.window?.makeFirstResponder(nil)
+        guard let field, let window = field.window, field.currentEditor() != nil else { return }
+        // Give browsing an explicit responder instead of allowing AppKit to
+        // choose the search field again during keyboard focus traversal.
+        window.makeFirstResponder(window)
     }
 }
 
@@ -112,6 +114,7 @@ enum SearchKeyRouting {
     /// Called only after shelf shortcuts have had a chance to handle the event.
     static func shouldFocusSearch(_ event: NSEvent, isEditing: Bool) -> Bool {
         guard event.type == .keyDown, !isEditing else { return false }
+        guard ![123, 124, 125, 126].contains(event.keyCode) else { return false }
         if event.modifierFlags.contains(.command) {
             // Native editing shortcuts (select all, paste, cut, undo/redo, copy).
             return !event.modifierFlags.contains(.control) && [0, 9, 7, 6, 8].contains(event.keyCode)

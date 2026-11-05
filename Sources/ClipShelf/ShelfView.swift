@@ -205,7 +205,11 @@ struct ShelfView: View {
             .scrollIndicators(.never)
             .modifier(ShelfScrollTracking(activity: scrollActivity))
             .overlay(alignment: .bottom) { ShelfScrollIndicator(activity: scrollActivity) }
-            .onReceive(NotificationCenter.default.publisher(for: .shelfDidShow)) { _ in scrollActivity.reset() }
+            .onReceive(NotificationCenter.default.publisher(for: .shelfDidShow)) { _ in
+                scrollActivity.reset()
+                scrollToSelectionOnShow(proxy)
+            }
+            .onAppear { scrollToSelectionOnShow(proxy) }
             .onDisappear { scrollActivity.reset() }
             .onChange(of: store.selectedID) { value in
                 if let value, store.selectionOrigin != .pointer {
@@ -218,6 +222,14 @@ struct ShelfView: View {
                 }
             }
         }.frame(maxHeight: .infinity)
+    }
+    private func scrollToSelectionOnShow(_ proxy: ScrollViewProxy) {
+        guard let id = store.selectedID else { return }
+        // Pasting keeps the selected ID while moving its record to the front.
+        // Reopening must restore the viewport even when onChange cannot fire.
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { proxy.scrollTo(id, anchor: .center) }
     }
     @ViewBuilder private func cardMenu(_ record: ClipRecord) -> some View {
         Button("粘贴") { paste(record, false) }

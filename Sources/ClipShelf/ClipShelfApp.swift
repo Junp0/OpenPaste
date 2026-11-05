@@ -32,7 +32,8 @@ extension Notification.Name {
     private var recordingShortcut = false
     private let hotKey = GlobalHotKey()
     private var keyMonitor: Any?
-    private var sizePreviewClickMonitor: Any?
+    private var panelClickMonitor: Any?
+    private var outsideClickMonitor: Any?
     private var targetApplication: NSRunningApplication?
     private var pasteInFlight = false
     private var menuTrackingDepth = 0
@@ -74,7 +75,7 @@ extension Notification.Name {
         }
         registerHotKey()
         installKeyboardHandling()
-        installSizePreviewClickHandling()
+        installOutsideClickHandling()
         showPanel()
     }
     private func configureMenu() {
@@ -239,11 +240,23 @@ extension Notification.Name {
     func applicationDidResignActive(_ notification: Notification) {
         if previewingDisplaySize { hidePanel() }
     }
-    private func installSizePreviewClickHandling() {
-        sizePreviewClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self, self.previewingDisplaySize, self.menuTrackingDepth == 0 else { return event }
-            if event.window !== self.settingsWindow { self.hidePanel() }
+    private func installOutsideClickHandling() {
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        panelClickMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
+            guard let self, self.panelShouldBeVisible, self.panel.attachedSheet == nil,
+                  self.store.draggedRecordID == nil, self.menuTrackingDepth == 0 else { return event }
+            // The status button already toggles the panel in its own action.
+            if event.window === self.statusItem.button?.window { return event }
+            let insideWindow = self.previewingDisplaySize ? self.settingsWindow : self.panel
+            if event.window !== insideWindow { self.hidePanel() }
             return event
+        }
+        // Local monitors do not receive clicks on the desktop or in other apps.
+        // Observe mouse clicks only; the original event keeps reaching its target.
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+            guard let self, self.panelShouldBeVisible, self.panel.attachedSheet == nil,
+                  self.store.draggedRecordID == nil else { return }
+            self.hidePanel()
         }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showPanel(); return true }
@@ -311,6 +324,8 @@ extension Notification.Name {
                 return nil
             }
             if event.keyCode == 125 || event.keyCode == 126 || ((event.keyCode == 123 || event.keyCode == 124) && (!editing || self.store.query.isEmpty)) {
+                self.searchInput.blur()
+                self.panel.makeFirstResponder(self.panel)
                 self.store.moveSelection((event.keyCode == 123 || event.keyCode == 126) ? -1 : 1); return nil
             }
             if plainSpace, (!editing || self.store.query.isEmpty), let record = self.store.selected {

@@ -22,7 +22,8 @@ import SwiftUI
         #expect(!SearchKeyRouting.shouldFocusSearch(try event(40, "k", flags: .control), isEditing: false))
     }
     @Test func navigationAndAlreadyFocusedInputKeepTheirNativeDestinations() throws {
-        for (code, text): (UInt16, String) in [(53, "\u{1b}"), (48, "\t"), (36, "\r"), (123, "\u{f702}"), (122, "\u{f704}")] {
+        for (code, text): (UInt16, String) in [(53, "\u{1b}"), (48, "\t"), (36, "\r"),
+            (123, "\u{f702}"), (124, "\u{f703}"), (125, "\u{f701}"), (126, "\u{f700}"), (122, "\u{f704}")] {
             #expect(!SearchKeyRouting.shouldFocusSearch(try event(code, text), isEditing: false))
         }
         #expect(!SearchKeyRouting.shouldFocusSearch(try event(0, "a"), isEditing: true))
@@ -37,6 +38,21 @@ import SwiftUI
         window.contentView?.addSubview(field)
         let input = SearchInputController(); input.field = field
         try action(input, field)
+    }
+    @Test func leavingSearchForCardNavigationKeepsTheWindowFocusedAndTextIntact() throws {
+        try withField { input, field in
+            #expect(input.focus(caretAtEnd: true))
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            editor.insertText("筛选", replacementRange: NSRange(location: NSNotFound, length: 0))
+            input.blur()
+            #expect(field.currentEditor() == nil)
+            #expect(field.window?.firstResponder === field.window)
+            #expect(field.stringValue == "原有😀筛选")
+            for code: UInt16 in [123, 124, 125, 126] {
+                #expect(!SearchKeyRouting.shouldFocusSearch(try event(code, ""), isEditing: false))
+                #expect(field.window?.firstResponder === field.window)
+            }
+        }
     }
     @Test func firstCharacterAppendsAfterReturningFromCardSelection() throws {
         try withField { input, field in
