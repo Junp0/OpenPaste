@@ -1,0 +1,34 @@
+# SwiftPM and local build products
+/.build/
+/build/
+/.swiftpm/
+DerivedData/
+*.app/
+*.dSYM/
+*.xcarchive/
+*.zip
+
+# macOS and per-user editor state
+.DS_Store
+._*
+xcuserdata/
+*.xcuserstate
+.idea/
+.vscode/
+
+# Local configuration, clipboard databases, and signing material
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.keychain
+*.keychain-db
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+keychain-password

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>iPaste</string>
+    <key>CFBundleDisplayName</key><string>iPaste</string>
+    <key>CFBundleIdentifier</key><string>io.clipshelf.app</string>
+    <key>CFBundleExecutable</key><string>iPaste</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.5.3</string>
+    <key>CFBundleVersion</key><string>13</string>
+    <key>CFBundleIconFile</key><string>iPaste</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key><string>Copyright © 2026 iPaste</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array><dict>
+        <key>UTTypeIdentifier</key><string>io.clipshelf.clip-record</string>
+        <key>UTTypeDescription</key><string>iPaste clipboard record</string>
+        <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+    </dict></array>
+</dict></plist>

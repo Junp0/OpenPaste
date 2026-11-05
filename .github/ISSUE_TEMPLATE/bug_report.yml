@@ -1,0 +1,30 @@
+name: Bug report / 问题反馈
+description: 报告可复现的问题，请使用虚构或脱敏内容。
+body:
+  - type: markdown
+    attributes:
+      value: 请勿上传真实剪贴板数据库、密码或签名资料。安全漏洞请按 SECURITY.md 私下报告。
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      description: iPaste 版本、macOS 版本、Apple Silicon 或 Intel；从源码构建时请附 Swift / SDK 版本。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 请使用虚构内容，并注明目标应用、输入法和相关权限状态。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期与实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 脱敏截图或日志（可选）

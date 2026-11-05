@@ -1,0 +1,109 @@
+import AppKit
+import Testing
+import SwiftUI
+@testable import ClipShelf
+
+@Suite @MainActor struct SearchInputTests {
+    private func event(_ keyCode: UInt16, _ text: String, flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+            timestamp: 0, windowNumber: 0, context: nil, characters: text, charactersIgnoringModifiers: text,
+            isARepeat: false, keyCode: keyCode))
+    }
+    @Test func textAndDeadKeysFocusSearchWithoutTurningCommandsIntoText() throws {
+        #expect(SearchKeyRouting.shouldFocusSearch(try event(0, "a"), isEditing: false))
+        #expect(SearchKeyRouting.shouldFocusSearch(try event(0, "A", flags: .shift), isEditing: false))
+        #expect(SearchKeyRouting.shouldFocusSearch(try event(0, "你"), isEditing: false))
+        #expect(SearchKeyRouting.shouldFocusSearch(try event(14, "", flags: .option), isEditing: false))
+        #expect(!SearchKeyRouting.shouldFocusSearch(try event(51, "\u{7f}"), isEditing: false))
+        #expect(!SearchKeyRouting.shouldFocusSearch(try event(117, "\u{f728}"), isEditing: false))
+        #expect(SearchKeyRouting.shouldFocusSearch(try event(9, "v", flags: .command), isEditing: false))
+        #expect(SearchKeyRouting.shouldFocusSearch(try event(0, "a", flags: .command), isEditing: false))
+        #expect(!SearchKeyRouting.shouldFocusSearch(try event(40, "k", flags: .command), isEditing: false))
+        #expect(!SearchKeyRouting.shouldFocusSearch(try event(40, "k", flags: .control), isEditing: false))
+    }
+    @Test func navigationAndAlreadyFocusedInputKeepTheirNativeDestinations() throws {
+        for (code, text): (UInt16, String) in [(53, "\u{1b}"), (48, "\t"), (36, "\r"), (123, "\u{f702}"), (122, "\u{f704}")] {
+            #expect(!SearchKeyRouting.shouldFocusSearch(try event(code, text), isEditing: false))
+        }
+        #expect(!SearchKeyRouting.shouldFocusSearch(try event(0, "a"), isEditing: true))
+    }
+    private func withField(_ action: (SearchInputController, NSTextField) throws -> Void) throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 80), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let field = NSTextField(frame: NSRect(x: 10, y: 10, width: 360, height: 24))
+        field.stringValue = "原有😀"
+        window.contentView?.addSubview(field)
+        let input = SearchInputController(); input.field = field
+        try action(input, field)
+    }
+    @Test func firstCharacterAppendsAfterReturningFromCardSelection() throws {
+        try withField { input, field in
+            #expect(input.focus(caretAtEnd: true))
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            #expect(editor.selectedRange() == NSRange(location: 4, length: 0))
+            editor.insertText("a", replacementRange: NSRange(location: NSNotFound, length: 0))
+            #expect(editor.string == "原有😀a")
+            input.blur()
+            #expect(field.stringValue == "原有😀a")
+            #expect(input.focus(caretAtEnd: true))
+            let secondEditor = try #require(field.currentEditor() as? NSTextView)
+            secondEditor.insertText("b", replacementRange: NSRange(location: NSNotFound, length: 0))
+            #expect(secondEditor.string == "原有😀ab")
+        }
+    }
+    @Test func backspaceStaysInSearchAfterDeletingTheLastCharacter() throws {
+        try withField { input, field in
+            field.stringValue = "a"
+            #expect(input.focus(caretAtEnd: true))
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            let backspace = try event(51, "\u{7f}")
+            for _ in 0..<3 {
+                let isEditing = field.window?.firstResponder is NSTextView
+                #expect(isEditing)
+                #expect(!ShelfPanelKeyAction.deletesSelectedRecord(backspace, isEditing: isEditing))
+                editor.deleteBackward(nil)
+                #expect(editor.string.isEmpty)
+            }
+            input.blur()
+            #expect(field.stringValue.isEmpty)
+            #expect(ShelfPanelKeyAction.deletesSelectedRecord(backspace, isEditing: field.window?.firstResponder is NSTextView))
+        }
+    }
+    @Test func refocusingDoesNotSelectOrCommitAnIMEComposition() throws {
+        try withField { input, field in
+            #expect(input.focus(caretAtEnd: true))
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            editor.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            #expect(editor.hasMarkedText())
+            let selection = editor.selectedRange()
+            #expect(input.focus())
+            #expect(editor.hasMarkedText())
+            #expect(editor.selectedRange() == selection)
+            editor.unmarkText()
+        }
+    }
+    @Test func placeholderHidesDuringIMECompositionWithoutChangingTheSearch() throws {
+        try withField { input, field in
+            var query = ""
+            field.stringValue = ""
+            let placeholder = NSTextField(labelWithString: "搜索")
+            let coordinator = SearchInput.Coordinator(text: Binding(get: { query }, set: { query = $0 }))
+            coordinator.placeholder = placeholder
+            #expect(input.focus())
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            coordinator.updatePlaceholder(field)
+            #expect(!placeholder.isHidden)
+            editor.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            coordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+            #expect(placeholder.isHidden)
+            #expect(query.isEmpty)
+            #expect(editor.hasMarkedText())
+            editor.unmarkText()
+            editor.string = ""; field.stringValue = ""
+            coordinator.updatePlaceholder(field)
+            #expect(!placeholder.isHidden)
+        }
+    }
+}
