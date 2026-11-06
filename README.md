@@ -16,29 +16,13 @@
 
 <p align="center"><strong>macOS 13+</strong> · SwiftUI + AppKit · SQLite · 无第三方依赖 · <a href="LICENSE">MIT</a></p>
 
-## 效果图
+## 界面截图
 
 屏幕底部的卡片面板，按 **⌘↑** 随时唤起。
 
-![OpenPaste 浅色界面：文本、链接、图片和文件卡片，以及收藏、分组和搜索入口](docs/assets/shelf-light.jpg)
+![OpenPaste 主界面：文本、链接、图片和文件卡片，以及收藏、分组和搜索入口](docs/assets/screenshot.jpg)
 
-<details>
-<summary>查看深色界面</summary>
-
-![OpenPaste 深色界面](docs/assets/shelf-dark.jpg)
-
-</details>
-
-<details>
-<summary>查看设置界面</summary>
-
-<p align="center">
-  <img src="docs/assets/preferences.jpg" alt="OpenPaste 设置：快捷键、面板大小、辅助功能权限与历史保留选项" width="480">
-</p>
-
-</details>
-
-*界面截图使用示例数据。macOS 26+ 使用 Liquid Glass，较旧系统回退至系统材质。*
+*截图使用示例数据。macOS 26+ 使用 Liquid Glass，较旧系统回退至系统材质。*
 
 ## 功能
 
@@ -54,7 +38,7 @@
 构建需要 **Swift 6.2+、macOS 26+ SDK**（Xcode 26+ 或对应 Command Line Tools）。
 
 ```sh
-git clone https://github.com/Junp0/iPaste.git OpenPaste
+git clone https://github.com/Junp0/OpenPaste.git
 cd OpenPaste
 ./scripts/build.sh
 ./scripts/run.sh
@@ -97,4 +81,4 @@ swift build -c release  # 仅编译可执行文件
 
 ## 许可证
 
-[MIT](LICENSE) · OpenPaste 是独立项目，与 Paste 无隶属或合作关系。
+[MIT](LICENSE)

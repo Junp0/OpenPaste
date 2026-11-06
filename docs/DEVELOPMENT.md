@@ -37,7 +37,7 @@ docs/                      使用、隐私、开发和验证文档
 
 `build/` 和 `.build/` 为本机生成目录，已被 Git 忽略。`docs/assets/icon.png` 来自 `scripts/make-icon.swift` 生成的应用图标，用于 README 展示。
 
-对外名称为 OpenPaste；内部模块 `ClipShelf`、Bundle ID `io.clipshelf.app`、历史目录 `ClipShelf` 及原有 `iPaste` 本机签名目录和证书保留，以兼容已有历史、偏好设置和授权。源码仓库地址暂沿用 `Junp0/iPaste`。
+对外名称为 OpenPaste；内部模块 `ClipShelf`、Bundle ID `io.clipshelf.app`、历史目录 `ClipShelf` 及原有 `iPaste` 本机签名目录和证书保留，以兼容已有历史、偏好设置和授权。源码仓库为 [Junp0/OpenPaste](https://github.com/Junp0/OpenPaste)。
 
 ## 运行进程与内存边界
 
