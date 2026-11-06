@@ -37,7 +37,37 @@ docs/                      使用、隐私、开发和验证文档
 
 `build/` 和 `.build/` 为本机生成目录，已被 Git 忽略。`docs/assets/icon.png` 来自 `scripts/make-icon.swift` 生成的应用图标，用于 README 展示。
 
-对外名称为 iPaste；内部模块 `ClipShelf`、Bundle ID `io.clipshelf.app`、历史目录 `ClipShelf` 保留原名，以兼容已有历史、偏好设置和授权。
+对外名称为 OpenPaste；内部模块 `ClipShelf`、Bundle ID `io.clipshelf.app`、历史目录 `ClipShelf` 及原有 `iPaste` 本机签名目录和证书保留，以兼容已有历史、偏好设置和授权。源码仓库地址暂沿用 `Junp0/iPaste`。
+
+## 运行进程与内存边界
+
+同一个签名可执行文件按角色运行，不增加新的应用标识或网络服务：
+
+| 角色 | 生命周期 | 职责 |
+| --- | --- | --- |
+| `ResidentAppDelegate` / `ClipboardMonitor` | 应用启动到退出 | 菜单栏、全局快捷键、检查剪贴板变化和任务调度；不加载历史列表或原始剪贴板数据 |
+| `AppDelegate`，`--shelf-interface` | 有用户窗口或粘贴任务时 | 原有 SwiftUI 界面、设置、预览、搜索及粘贴；所有窗口关闭后握手退出 |
+| `CaptureWorker`，`--capture-worker` | 一次捕获 | 读取剪贴板快照、过滤敏感标记、生成缩略图并保存 SQLite，然后退出 |
+
+控制消息仅通过继承的匿名管道传输，剪贴板载荷直接写入本机数据库。快捷键注册仍由常驻进程拥有；剪贴板恢复先等待常驻进程暂停捕获的确认，写入后同步 change count，避免把恢复的内容当成外部新复制。通过进程 ID 和 Bundle ID 一起排除应用自身的搜索、设置字段。
+
+捕获任务串行运行；有新变化时只保留最新待处理快照，源应用和 change count 在读取前后校验。未响应的任务五秒后终止，防止挂起的 promised flavor 长期保留进程。UI 和捕获任务不应改为常驻缓存：系统框架与剪贴板缓存即使释放 Swift 对象，也可能继续占用内存。
+
+后台预算适用于所有用户窗口关闭、捕获完成后的空闲状态，须把所有存活 OpenPaste 进程的 physical footprint 合计。窗口打开和大内容处理期间的峰值不受 30 MiB 目标约束。
+
+开发时可直接启动后台模式；先退出已有主实例：
+
+```sh
+build/OpenPaste.app/Contents/MacOS/OpenPaste --background
+```
+
+加 `--verify-background-memory` 会仅在启动时通过隐藏窗口加载并关闭真实面板和设置，验证匿名管道及界面退出生命周期，不显示窗口、不激活应用；验证后继续正常后台监测，之后快捷键仍会显示正常界面。
+
+```sh
+build/OpenPaste.app/Contents/MacOS/OpenPaste --background --verify-background-memory
+./scripts/measure-runtime-memory.sh
+./scripts/measure-capture-memory.sh
+```
 
 ## 构建与启动
 
@@ -46,10 +76,23 @@ docs/                      使用、隐私、开发和验证文档
 ```sh
 ./scripts/build.sh        # release 编译、生成图标、打包并签名
 ./scripts/build.sh debug  # debug 应用包
-./scripts/run.sh          # 打开 build/iPaste.app，不存在时先构建
+./scripts/run.sh          # 打开 build/OpenPaste.app，不存在时先构建
+./scripts/package-release.sh # 将已签名的 build/OpenPaste.app 打包到 release/，生成 app、ZIP 和 DMG
 ```
 
 `run.sh` 在应用包已存在时直接启动它，不检测源码是否更新。修改代码后请先从菜单栏退出应用，再重新构建；不会自动重启已运行的进程。
+
+分发包统一放在 `release/`，`build/` 保留本机构建产物。DMG 内含 `OpenPaste.app` 和指向 `/Applications` 的“应用程序”快捷入口，提供中英文系统均可读取的固定 Finder 图标布局、中文拖拽安装说明、1×/2× 高清背景及自定义磁盘图标，使用只读 UDZO 压缩。只需重新打包现有应用时，直接运行 `package-release.sh`，不必重新编译，也不修改运行中的应用。
+
+打包需要 Xcode 命令行工具及 Python 3；首次运行会在 `build/dmg-tools/` 创建隔离环境并安装 `scripts/requirements-dmg.txt` 中锁定的两个 Finder 元数据依赖，应用本身不依赖 Python。背景由 `scripts/make-dmg-background.swift` 生成，窗口尺寸和图标位置由 `scripts/configure-dmg.py` 维护。
+
+可显式指定其他已签名应用包作为打包来源：
+
+```sh
+./scripts/package-release.sh release/OpenPaste.app
+```
+
+脚本检查应用签名及 DMG 校验和，并重新只读挂载成品，验证应用内容与来源一致、快捷入口、背景及图标布局；检查通过后才替换 `release/` 中的 DMG，同时生成 DMG、ZIP 对应的 `SHA256SUMS.txt`。DMG 包装不代表完成 Developer ID 签名或 Apple 公证。
 
 只检查编译或运行测试时不需要创建签名身份：
 
@@ -96,7 +139,7 @@ CODE_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./scripts/buil
 git status --short
 git add .
 git diff --cached --stat
-git commit -m "chore: prepare iPaste for open source"
+git commit -m "chore: prepare OpenPaste for open source"
 ```
 
 在 GitHub 创建一个空仓库，避免同时生成 README 或许可证。随后按照 GitHub 页面给出的仓库 URL 添加 `origin` 并推送 `main`。不要把 `.build/`、`build/`、用户数据库、证书或环境配置强制加入 Git。

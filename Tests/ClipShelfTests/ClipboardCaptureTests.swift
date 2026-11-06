@@ -74,4 +74,70 @@ import ClipboardCore
             #expect(draft.text == "/tmp/a.txt\n/tmp/b.txt")
         }
     }
+
+    @Test func uncachedSnapshotKeepsTextFormatsAndExistingFingerprints() throws {
+        try withBoard { board in
+            let item = NSPasteboardItem()
+            item.setString("中文与 English", forType: .string)
+            item.setString("<b>中文与 English</b>", forType: .html)
+            board.writeObjects([item])
+            guard case .captured(let expected) = ClipboardCapture.read(board, source: nil),
+                  case .captured(let snapshot) = ClipboardCapture.readUncached(board.name, source: nil) else {
+                Issue.record("临时快照应捕获多格式文本"); return
+            }
+            #expect(snapshot.text == expected.text)
+            #expect(snapshot.payload.fingerprint == expected.payload.fingerprint)
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let database = try ClipboardDatabase(url: directory.appendingPathComponent("history.sqlite"))
+            #expect(try database.save(expected) == database.save(snapshot))
+        }
+    }
+
+    @Test func uncachedSnapshotPreservesImagesAndMultipleFileItems() throws {
+        try withBoard { board in
+            let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 24,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+            memset(try #require(bitmap.bitmapData), 128, bitmap.bytesPerRow * bitmap.pixelsHigh)
+            let png = try #require(bitmap.representation(using: .png, properties: [:]))
+            board.setData(png, forType: .png)
+            guard case .captured(let image) = ClipboardCapture.readUncached(board.name, source: nil) else {
+                Issue.record("临时快照应捕获图片"); return
+            }
+            #expect(image.title == "32 × 24")
+            #expect(image.thumbnail != nil)
+            #expect(image.payload.items.first?.first?.data == png)
+            board.clearContents()
+            let files = ["file:///tmp/a.txt", "file:///tmp/b.txt"].map { value in
+                let item = NSPasteboardItem(); item.setString(value, forType: .fileURL); return item
+            }
+            board.writeObjects(files)
+            guard case .captured(let snapshot) = ClipboardCapture.readUncached(board.name, source: nil),
+                  case .captured(let expected) = ClipboardCapture.read(board, source: nil) else {
+                Issue.record("临时快照应捕获文件引用"); return
+            }
+            #expect(snapshot.kind == .file)
+            #expect(snapshot.text == "/tmp/a.txt\n/tmp/b.txt")
+            #expect(snapshot.payload.items.count == 2)
+            #expect(snapshot.payload.fingerprint == expected.payload.fingerprint)
+        }
+    }
+
+    @Test func uncachedSnapshotRejectsSensitiveMarkersAndOversizePayloads() {
+        withBoard { board in
+            let item = NSPasteboardItem()
+            item.setString("secret", forType: .string)
+            item.setString("", forType: .init("org.nspasteboard.ConcealedType"))
+            board.writeObjects([item])
+            guard case .ignored = ClipboardCapture.readUncached(board.name, source: nil) else {
+                Issue.record("临时快照不应保存敏感内容"); return
+            }
+            board.clearContents()
+            board.setData(Data(repeating: 97, count: ClipboardCapture.maximumBytes + 1), forType: .string)
+            guard case .tooLarge = ClipboardCapture.readUncached(board.name, source: nil) else {
+                Issue.record("临时快照不应保存超大内容"); return
+            }
+        }
+    }
 }

@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import UniformTypeIdentifiers
 import ClipboardCore
+import Carbon
 
 enum ClipboardCapture {
     static let maximumBytes = 20 * 1024 * 1024
@@ -34,9 +35,71 @@ enum ClipboardCapture {
             }
             if !values.isEmpty { representations.append(values) }
         }
+        let fileURLs = items.compactMap { $0.string(forType: .fileURL) }.compactMap(URL.init(string:))
+        return makeDraft(representations: representations,
+            text: pasteboard.string(forType: .string) ?? pasteboard.string(forType: .URL) ?? "",
+            fileURLs: fileURLs, source: source)
+    }
+
+    /// A short-lived Pasteboard Manager snapshot avoids NSPasteboard.general's
+    /// retained flavor-data cache. Even rejected large payloads can otherwise
+    /// stay alive there until the next copy, exceeding the resident budget.
+    static func readUncached(_ name: NSPasteboard.Name, source: NSRunningApplication?) -> Outcome {
+        // Cocoa's advertised types exclude synthesized legacy translations.
+        // Read metadata only here, so fingerprints stay compatible without
+        // populating NSPasteboard's long-lived flavor-data cache.
+        guard let advertisedItems = NSPasteboard(name: name).pasteboardItems, !advertisedItems.isEmpty else { return .ignored }
+        if advertisedItems.contains(where: { $0.types.contains(where: { ignoredTypes.contains($0.rawValue) }) }) { return .ignored }
+        var reference: Pasteboard?
+        let boardName = (name == .general ? kPasteboardClipboard : name.rawValue) as CFString
+        guard PasteboardCreate(boardName, &reference) == noErr, let reference else { return .ignored }
+        PasteboardSynchronize(reference)
+        var count = 0
+        guard PasteboardGetItemCount(reference, &count) == noErr, count == advertisedItems.count else { return .ignored }
+        var items: [(PasteboardItemID, [String])] = []
+        for index in 1...count {
+            var identifier: PasteboardItemID?
+            var flavors: CFArray?
+            guard PasteboardGetItemIdentifier(reference, index, &identifier) == noErr, let identifier,
+                  PasteboardCopyItemFlavors(reference, identifier, &flavors) == noErr,
+                  let types = flavors as? [String] else { return .ignored }
+            // Inspect all markers before reading even one payload.
+            if types.contains(where: ignoredTypes.contains) { return .ignored }
+            items.append((identifier, advertisedItems[index - 1].types.map(\.rawValue)))
+        }
+        var total = 0
+        var representations: [[ClipRepresentation]] = []
+        for (identifier, types) in items {
+            var values: [ClipRepresentation] = []
+            for type in types where supportedTypes.contains(type) {
+                var value: CFData?
+                guard PasteboardCopyItemFlavorData(reference, identifier, type as CFString, &value) == noErr,
+                      let value, CFDataGetLength(value) > 0 else { continue }
+                total += CFDataGetLength(value)
+                guard total <= maximumBytes else { return .tooLarge }
+                values.append(ClipRepresentation(type: type, data: value as Data))
+            }
+            if !values.isEmpty { representations.append(values) }
+        }
+        let all = representations.flatMap { $0 }
+        func string(_ type: String, encoding: String.Encoding = .utf8) -> String? {
+            all.first(where: { $0.type == type }).flatMap { String(data: $0.data, encoding: encoding) }
+        }
+        let text = string(NSPasteboard.PasteboardType.string.rawValue)
+            ?? string("public.utf16-plain-text", encoding: .utf16)
+            ?? string(NSPasteboard.PasteboardType.URL.rawValue) ?? ""
+        let fileURLs = representations.compactMap { item in
+            item.first(where: { $0.type == NSPasteboard.PasteboardType.fileURL.rawValue })
+                .flatMap { String(data: $0.data, encoding: .utf8) }.flatMap(URL.init(string:))
+        }
+        return makeDraft(representations: representations, text: text, fileURLs: fileURLs, source: source)
+    }
+
+    private static func makeDraft(representations: [[ClipRepresentation]], text: String,
+                                  fileURLs: [URL], source: NSRunningApplication?) -> Outcome {
         guard !representations.isEmpty else { return .ignored }
         let all = representations.flatMap { $0 }
-        var text = pasteboard.string(forType: .string) ?? pasteboard.string(forType: .URL) ?? ""
+        var text = text
         if text.isEmpty, let rtf = all.first(where: { $0.type == NSPasteboard.PasteboardType.rtf.rawValue }),
            let attributed = try? NSAttributedString(data: rtf.data, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
             text = attributed.string
@@ -45,7 +108,6 @@ enum ClipboardCapture {
         var kind: ClipKind = .text
         var title = String(trimmed.split(whereSeparator: \.isNewline).first.map(String.init)?.prefix(160) ?? "富文本".prefix(160))
         var thumbnail: Data?
-        let fileURLs = items.compactMap { $0.string(forType: .fileURL) }.compactMap(URL.init(string:))
         if !fileURLs.isEmpty {
             kind = .file
             title = fileURLs.count == 1 ? fileURLs[0].lastPathComponent : "\(fileURLs.count) 个文件"

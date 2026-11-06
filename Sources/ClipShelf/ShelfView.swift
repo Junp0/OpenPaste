@@ -77,9 +77,9 @@ struct ShelfView: View {
                         .renderingMode(.original).resizable().interpolation(.high)
                         .frame(width: 30, height: 30)
                         .accessibilityHidden(true)
-                    Text("iPaste").font(.system(size: 18, weight: .semibold, design: .rounded))
+                    Text("OpenPaste").font(.system(size: 18, weight: .semibold, design: .rounded))
                 }
-                .padding(.trailing, 10).help("iPaste · 你的下一次粘贴，随手可得")
+                .padding(.trailing, 10).help("OpenPaste · 你的下一次粘贴，随手可得")
                 groupTabs
                 HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(.secondary)

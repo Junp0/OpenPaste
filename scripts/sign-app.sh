@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-app_dir="${1:?用法：sign-app.sh /path/to/iPaste.app}"
+app_dir="${1:?用法：sign-app.sh /path/to/OpenPaste.app}"
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_dir/Contents/Info.plist")"
 
 # 发布构建可传入 Apple Development / Developer ID 身份；指定失败时绝不回退到临时签名。
@@ -16,6 +16,7 @@ if [ -n "${CODE_SIGN_IDENTITY:-}" ]; then
     fi
     codesign "${sign_args[@]}" "$app_dir"
 else
+    # 更名后沿用 iPaste 的签名目录、钥匙串和证书，保持已有辅助功能授权。
     # 固定身份存放在源码和 build 目录之外，清理或重新克隆项目不会更换身份。
     # 独立钥匙串仅保存本应用的签名密钥，不修改系统信任或辅助功能授权。
     umask 077

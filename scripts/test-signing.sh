@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-app_dir="${1:-build/iPaste.app}"
+app_dir="${1:-build/OpenPaste.app}"
 qa_dir="$(mktemp -d "${TMPDIR:-/tmp}/ipaste-signing.XXXXXX")"
 trap 'rm -rf "$qa_dir"' EXIT
 

@@ -7,6 +7,7 @@ DerivedData/
 *.dSYM/
 *.xcarchive/
 *.zip
+*.dmg
 
 # macOS and per-user editor state
 .DS_Store

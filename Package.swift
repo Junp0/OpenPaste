@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "iPaste",
+    name: "OpenPaste",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "iPaste", targets: ["ClipShelf"])],
+    products: [.executable(name: "OpenPaste", targets: ["ClipShelf"])],
     targets: [
         .systemLibrary(name: "CSQLite"),
         .target(name: "ClipboardCore", dependencies: ["CSQLite"]),

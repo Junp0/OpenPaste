@@ -11,7 +11,7 @@ import ClipboardCore
     @Published var isCreatingCollection = false
     @Published private(set) var draggedRecordID: String?
     @Published var displaySize: ShelfDisplaySize {
-        didSet { UserDefaults.standard.set(displaySize.rawValue, forKey: "displaySize"); onAppearanceChange?() }
+        didSet { UserDefaults.standard.set(displaySize.rawValue, forKey: "displaySize"); preferencesDidChange(); onAppearanceChange?() }
     }
     @Published var selectedID: String? { didSet { selectionOrigin = .navigation } }
     private(set) var selectionOrigin = SelectionOrigin.navigation
@@ -19,13 +19,13 @@ import ClipboardCore
     @Published var message = "只保存在这台 Mac 上"
     @Published var errorMessage: String?
     @Published var paused: Bool {
-        didSet { UserDefaults.standard.set(paused, forKey: "paused"); onStateChange?() }
+        didSet { UserDefaults.standard.set(paused, forKey: "paused"); preferencesDidChange(); onStateChange?() }
     }
     @Published var retentionDays: Int {
-        didSet { UserDefaults.standard.set(retentionDays, forKey: "retentionDays"); prune() }
+        didSet { UserDefaults.standard.set(retentionDays, forKey: "retentionDays"); preferencesDidChange(); prune() }
     }
     @Published var exclusions: String {
-        didSet { UserDefaults.standard.set(exclusions, forKey: "exclusions") }
+        didSet { UserDefaults.standard.set(exclusions, forKey: "exclusions"); preferencesDidChange() }
     }
     @Published private(set) var shortcut: ShelfShortcut
     @Published var shortcutError: String?
@@ -34,6 +34,10 @@ import ClipboardCore
     var onShortcutRecordingChange: ((Bool) -> Void)?
     var onAppearanceChange: (() -> Void)?
     var onDragEnd: ((Bool) -> Void)?
+    var onPreferencesChange: (() -> Void)?
+    var onBeforeClipboardRestore: (() -> Bool)?
+    var onClipboardRestore: ((Int) -> Void)?
+    private var refreshingPreferences = false
     let database: ClipboardDatabase
     let dataDirectory: URL
     private var timer: Timer?
@@ -95,8 +99,28 @@ import ClipboardCore
             shortcutError = "这个组合键无法注册，可能已被其他应用或系统占用。请换一个，原快捷键已保留。"; return false
         }
         shortcut = candidate; candidate.save(in: .standard); shortcutError = nil
+        preferencesDidChange()
         onStateChange?()
         return true
+    }
+    private func preferencesDidChange() {
+        guard !refreshingPreferences else { return }
+        UserDefaults.standard.synchronize()
+        onPreferencesChange?()
+    }
+    func reloadPreferences() {
+        let defaults = UserDefaults.standard
+        defaults.synchronize()
+        refreshingPreferences = true
+        defer { refreshingPreferences = false }
+        if paused != defaults.bool(forKey: "paused") { paused = defaults.bool(forKey: "paused") }
+        if retentionDays != defaults.integer(forKey: "retentionDays") { retentionDays = defaults.integer(forKey: "retentionDays") }
+        let excluded = defaults.string(forKey: "exclusions") ?? ""
+        if exclusions != excluded { exclusions = excluded }
+        let size = ShelfDisplaySize.load(from: defaults)
+        if displaySize != size { displaySize = size }
+        let configured = ShelfShortcut.load(from: defaults)
+        if shortcut != configured { shortcut = configured }
     }
     var excludedBundles: Set<String> { Set(exclusions.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }) }
     func count(for filter: String) -> Int {
@@ -284,6 +308,12 @@ import ClipboardCore
                     for value in representations { item.setData(value.data, forType: NSPasteboard.PasteboardType(value.type)) }
                     return item
                 }
+            }
+            if board.name == .general, onBeforeClipboardRestore?() == false {
+                errorMessage = "后台记录服务暂时无法响应，请重试。"; return false
+            }
+            defer {
+                if board.name == .general { onClipboardRestore?(board.changeCount) }
             }
             board.clearContents()
             let success = board.writeObjects(items)

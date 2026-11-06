@@ -23,7 +23,7 @@ func pasteMark() -> NSBezierPath {
 }
 
 let buildDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("build")
-let directory = buildDirectory.appendingPathComponent("iPaste.iconset")
+let directory = buildDirectory.appendingPathComponent("OpenPaste.iconset")
 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 let cream = NSColor(calibratedRed: 1, green: 0.975, blue: 0.935, alpha: 1)
 
@@ -68,7 +68,7 @@ for size in [16, 32, 128, 256, 512] {
 }
 
 // Vector PDF stays sharp on every display and is tinted by AppKit for light/dark menus.
-let statusURL = buildDirectory.appendingPathComponent("iPasteStatus.pdf")
+let statusURL = buildDirectory.appendingPathComponent("OpenPasteStatus.pdf")
 var mediaBox = CGRect(x: 0, y: 0, width: 18, height: 18)
 guard let consumer = CGDataConsumer(url: statusURL as CFURL),
       let pdf = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
@@ -87,6 +87,6 @@ pdf.closePDF()
 
 let process = Process()
 process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
-process.arguments = ["-c", "icns", directory.path, "-o", buildDirectory.appendingPathComponent("iPaste.icns").path]
+process.arguments = ["-c", "icns", directory.path, "-o", buildDirectory.appendingPathComponent("OpenPaste.icns").path]
 try process.run(); process.waitUntilExit()
 guard process.terminationStatus == 0 else { exit(process.terminationStatus) }

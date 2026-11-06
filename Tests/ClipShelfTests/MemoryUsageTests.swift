@@ -1,5 +1,6 @@
 import AppKit
 import ClipboardCore
+import SwiftUI
 import Testing
 @testable import ClipShelf
 
@@ -67,5 +68,68 @@ import Testing
 
     @Test func corruptImageDataCannotProduceAPreviewBitmap() {
         #expect(ClipImageDecoder.image(from: Data("invalid".utf8), maximumPixelSize: 560) == nil)
+    }
+
+    @Test func closingSettingsReleasesItsHostingViewAndFieldEditor() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try ClipboardStore(dataDirectory: directory, monitorsClipboard: false)
+        for _ in 0..<3 {
+            var window: SettingsWindow? = SettingsWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 720),
+                styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window?.isReleasedWhenClosed = false
+            weak var oldWindow = window
+            weak var oldContent: NSView?
+            autoreleasepool {
+                let content = NSHostingView(rootView: PreferencesView(store: store))
+                window?.contentView = content
+                content.layoutSubtreeIfNeeded()
+                oldContent = content
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+            window?.close()
+            #expect(window?.contentView == nil)
+            window = nil
+            for _ in 0..<50 {
+                if oldContent == nil && oldWindow == nil { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            #expect(oldContent == nil)
+            #expect(oldWindow == nil)
+        }
+    }
+
+    @Test func closingShelfReleasesTheWindowAsWellAsItsContent() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try ClipboardStore(dataDirectory: directory, monitorsClipboard: false)
+        let search = SearchInputController()
+        for _ in 0..<3 {
+            var panel: ShelfPanel? = ShelfPanel(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 470),
+                styleMask: .borderless, backing: .buffered, defer: false)
+            panel?.isReleasedWhenClosed = false
+            weak var oldWindow = panel
+            panel?.mountContentIfNeeded {
+                ShelfView(store: store, searchInput: search, paste: { _, _ in },
+                    copy: { _ in }, showSettings: {}, dismiss: {})
+            }
+            panel?.contentView?.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 50_000_000)
+            #expect(search.field != nil)
+            autoreleasepool {
+                panel?.makeFirstResponder(search.field)
+                panel?.releaseContent()
+                panel?.close()
+                panel = nil
+            }
+            for _ in 0..<50 {
+                if search.field == nil && oldWindow == nil { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            #expect(search.field == nil)
+            #expect(oldWindow == nil)
+        }
     }
 }

@@ -8,7 +8,7 @@ body:
     id: environment
     attributes:
       label: 运行环境
-      description: iPaste 版本、macOS 版本、Apple Silicon 或 Intel；从源码构建时请附 Swift / SDK 版本。
+      description: OpenPaste 版本、macOS 版本、Apple Silicon 或 Intel；从源码构建时请附 Swift / SDK 版本。
     validations:
       required: true
   - type: textarea

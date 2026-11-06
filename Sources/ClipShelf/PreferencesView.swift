@@ -23,7 +23,7 @@ struct PreferencesView: View {
                         .frame(width: 64, height: 64)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("iPaste").font(.system(size: 25, weight: .semibold, design: .rounded))
+                        Text("OpenPaste").font(.system(size: 25, weight: .semibold, design: .rounded))
                         Text("你的下一次粘贴，随手可得。  v\(appVersion)").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.vertical, 6)
