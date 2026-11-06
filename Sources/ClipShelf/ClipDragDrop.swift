@@ -37,6 +37,7 @@ enum ClipDragItem {
 
 struct ClipDragPreview: View {
     let record: ClipRecord
+    let store: ClipboardStore
 
     var body: some View {
         HStack(spacing: 8) {
@@ -58,8 +59,8 @@ struct ClipDragPreview: View {
     }
 
     @ViewBuilder private var thumbnail: some View {
-        if record.kind == .image, let data = record.thumbnail, let image = NSImage(data: data) {
-            Image(nsImage: image).resizable().scaledToFill()
+        if record.kind == .image {
+            ClipThumbnailView(record: record, store: store)
         } else {
             ZStack {
                 record.kind.color.opacity(0.12)

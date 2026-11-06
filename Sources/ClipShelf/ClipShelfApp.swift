@@ -13,8 +13,22 @@ import ClipboardCore
 }
 
 final class ShelfPanel: NSPanel {
+    private(set) var hasShelfContent = false
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    func mountContentIfNeeded<Content: View>(@ViewBuilder _ content: () -> Content) {
+        guard !hasShelfContent else { return }
+        contentView = NSHostingView(rootView: content())
+        hasShelfContent = true
+    }
+
+    func releaseContent() {
+        // The field editor must not keep the old search field as its responder.
+        makeFirstResponder(self)
+        contentView = nil
+        hasShelfContent = false
+    }
 }
 
 extension Notification.Name {
@@ -107,11 +121,20 @@ extension Notification.Name {
         panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = true
         panel.hidesOnDeactivate = false; panel.isReleasedWhenClosed = false
         panel.delegate = self
-        panel.contentView = NSHostingView(rootView: ShelfContainerView(presentation: presentation, content: ShelfView(store: store, searchInput: searchInput,
+        panel.contentView = nil
+    }
+    private func mountShelfContent() {
+        panel.mountContentIfNeeded {
+            ShelfContainerView(presentation: presentation, content: ShelfView(store: store, searchInput: searchInput,
             paste: { [weak self] record, plain in self?.paste(record, plainText: plain) },
             copy: { [weak self] record in self?.copyOnly(record) },
             showSettings: { [weak self] in self?.openSettings() },
-            dismiss: { [weak self] in self?.hidePanel(restoreFocus: true) })))
+            dismiss: { [weak self] in self?.hidePanel(restoreFocus: true) }))
+        }
+    }
+    private func releaseShelfContent() {
+        panel.releaseContent()
+        store.releaseTransientResources()
     }
     private func configureStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -181,6 +204,7 @@ extension Notification.Name {
             panel.setFrame(ShelfPresentation.frame(screen: screen.frame, visible: screen.visibleFrame, size: store.displaySize), display: true)
         }
         store.prepareToShow()
+        mountShelfContent()
         if forSizePreview {
             // Let Settings keep keyboard focus so the user can compare sizes.
             panel.orderFront(nil)
@@ -210,8 +234,12 @@ extension Notification.Name {
             DispatchQueue.main.asyncAfter(deadline: .now() + presentation.hideDuration) { [weak self] in
                 guard let self, self.panelTransition == transition, !self.panelShouldBeVisible else { return }
                 self.panel.orderOut(nil)
+                self.releaseShelfContent()
             }
-        } else { panel.orderOut(nil) }
+        } else {
+            panel.orderOut(nil)
+            releaseShelfContent()
+        }
         if restoreFocus {
             if returnToSettingsAfterPanel, let settingsWindow, settingsWindow.isVisible {
                 settingsWindow.makeKeyAndOrderFront(nil)

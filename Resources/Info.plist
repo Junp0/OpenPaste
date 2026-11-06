@@ -6,8 +6,8 @@
     <key>CFBundleIdentifier</key><string>io.clipshelf.app</string>
     <key>CFBundleExecutable</key><string>iPaste</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.5.3</string>
-    <key>CFBundleVersion</key><string>13</string>
+    <key>CFBundleShortVersionString</key><string>0.6.0</string>
+    <key>CFBundleVersion</key><string>14</string>
     <key>CFBundleIconFile</key><string>iPaste</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>

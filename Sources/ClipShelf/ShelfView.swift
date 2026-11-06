@@ -179,7 +179,7 @@ struct ShelfView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 16) {
                     ForEach(Array(store.visibleRecords.enumerated()), id: \.element.id) { index, record in
-                        ClipCard(record: record, index: index, selected: store.selectedID == record.id, size: store.displaySize,
+                        ClipCard(record: record, store: store, index: index, selected: store.selectedID == record.id, size: store.displaySize,
                             select: { searchInput.blur(); store.selectCard(record) },
                             paste: { paste(record, false) }, favorite: { store.favorite(record) })
                             .id(record.id)
@@ -188,7 +188,7 @@ struct ShelfView: View {
                                 store.beginClipDrag(record)
                                 return ClipDragItem.provider(recordID: record.id)
                             } preview: {
-                                ClipDragPreview(record: record)
+                                ClipDragPreview(record: record, store: store)
                             }
                             .modifier(ClipDragLifecycle(store: store))
                             .contextMenu { cardMenu(record) }
@@ -309,6 +309,7 @@ struct ShelfView: View {
 
 private struct ClipCard: View {
     let record: ClipRecord
+    let store: ClipboardStore
     let index: Int
     let selected: Bool
     let size: ShelfDisplaySize
@@ -370,10 +371,10 @@ private struct ClipCard: View {
         .help("拖到顶部分组归类；单击选择，双击粘贴；右键查看更多操作")
     }
     @ViewBuilder private var content: some View {
-        if record.kind == .image, let data = record.thumbnail, let image = NSImage(data: data) {
+        if record.kind == .image {
             ZStack {
                 record.kind.color.opacity(0.025)
-                Image(nsImage: image).resizable().scaledToFit().padding(9)
+                ClipThumbnailView(record: record, store: store).padding(9)
                 VStack { Spacer(); HStack { Text(record.title).font(.system(size: size.sourceFontSize, design: .monospaced)).padding(5).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4)); Spacer() } }.padding(9)
             }
         } else if record.kind == .link {
@@ -439,5 +440,6 @@ private struct PreviewView: View {
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(IPastePanelBackground()).tint(shelfAccent)
             .onAppear { image = store.previewImage(for: record) }
+            .onDisappear { image = nil }
     }
 }

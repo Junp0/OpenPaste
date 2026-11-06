@@ -43,8 +43,11 @@ import ClipboardCore
     private var activationObserver: NSObjectProtocol?
     private var dragTimer: Timer?
     private var dragGeneration: UInt64 = 0
+    private let thumbnailCache = NSCache<NSString, NSImage>()
 
     init(dataDirectory: URL? = nil, monitorsClipboard: Bool = true) throws {
+        thumbnailCache.totalCostLimit = 8 * 1024 * 1024
+        thumbnailCache.countLimit = 24
         let defaults = UserDefaults.standard
         defaults.register(defaults: ["retentionDays": 30,
             "exclusions": "com.1password.1password\ncom.agilebits.onepassword7\ncom.bitwarden.desktop\norg.keepassxc.keepassxc"])
@@ -66,7 +69,7 @@ import ClipboardCore
             Task { @MainActor [weak self] in self?.lastSource = app }
         }
         timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
+            Task { @MainActor in autoreleasepool { self?.poll() } }
         }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
         pruneTimer = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in
@@ -104,7 +107,7 @@ import ClipboardCore
         query = ""; filter = "all"; selectedID = visibleRecords.first?.id
         message = paused ? "记录已暂停" : "只保存在这台 Mac 上"
     }
-    func capturePendingChange() { poll() }
+    func capturePendingChange() { autoreleasepool { poll() } }
     func cycleGroup(by offset: Int) { filter = ShelfGroupNavigation.target(current: filter, collections: collections, offset: offset) }
     func ensureSelection() {
         let visible = visibleRecords
@@ -151,7 +154,7 @@ import ClipboardCore
         }
     }
     func reload() throws {
-        records = try database.records(); collections = try database.collections(); ensureSelection()
+        records = try database.records(includeThumbnails: false); collections = try database.collections(); ensureSelection()
     }
     func perform(_ operation: () throws -> Void) {
         do { try operation() } catch { errorMessage = error.localizedDescription }
@@ -228,6 +231,7 @@ import ClipboardCore
         }
         perform {
             try database.delete(id: record.id)
+            thumbnailCache.removeObject(forKey: record.id as NSString)
             let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             withAnimation(.easeInOut(duration: reduceMotion ? 0.12 : 0.24)) {
                 records.removeAll { $0.id == record.id }
@@ -241,7 +245,9 @@ import ClipboardCore
             }
         }
     }
-    func clearHistory() { perform { try database.clearHistory(); try reload() } }
+    func clearHistory() {
+        perform { try database.clearHistory(); thumbnailCache.removeAllObjects(); try reload() }
+    }
     func addCollection(name: String, icon: String = ClipCollection.defaultIcon, select: Bool = true) {
         let name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
         guard !name.isEmpty else { return }
@@ -286,14 +292,41 @@ import ClipboardCore
             return success
         } catch { errorMessage = error.localizedDescription; return false }
     }
+    func releaseTransientResources() {
+        thumbnailCache.removeAllObjects()
+    }
+
+    func thumbnail(for record: ClipRecord) -> NSImage? {
+        guard record.kind == .image else { return nil }
+        if let image = thumbnailCache.object(forKey: record.id as NSString) { return image }
+        return autoreleasepool {
+            do {
+                guard let data = try database.thumbnail(for: record.id),
+                      let image = ClipImageDecoder.image(from: data, maximumPixelSize: ClipImageDecoder.thumbnailPixelSize) else { return nil }
+                let cost = image.representations.reduce(0) { total, representation in
+                    let rowBytes = (representation as? NSBitmapImageRep)?.bytesPerRow ?? representation.pixelsWide * 4
+                    return total + rowBytes * representation.pixelsHigh
+                }
+                thumbnailCache.setObject(image, forKey: record.id as NSString, cost: cost)
+                return image
+            } catch { errorMessage = error.localizedDescription; return nil }
+        }
+    }
+
     func previewImage(for record: ClipRecord) -> NSImage? {
         guard record.kind == .image else { return nil }
-        do {
-            let payload = try database.payload(for: record.id)
-            if let data = payload.items.flatMap({ $0 }).first(where: { ["public.png", "public.jpeg", "public.tiff"].contains($0.type) })?.data {
-                return NSImage(data: data)
-            }
-        } catch { errorMessage = error.localizedDescription }
-        return record.thumbnail.flatMap(NSImage.init(data:))
+        return autoreleasepool {
+            do {
+                let payload = try database.payload(for: record.id)
+                for item in payload.items {
+                    for value in item where ["public.png", "public.jpeg", "public.tiff"].contains(value.type) {
+                        if let image = ClipImageDecoder.image(from: value.data, maximumPixelSize: ClipImageDecoder.previewPixelSize) {
+                            return image
+                        }
+                    }
+                }
+            } catch { errorMessage = error.localizedDescription }
+            return thumbnail(for: record)
+        }
     }
 }

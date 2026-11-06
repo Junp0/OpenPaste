@@ -53,13 +53,14 @@ enum ClipboardCapture {
         } else if let picture = all.first(where: { [NSPasteboard.PasteboardType.png.rawValue, "public.jpeg", NSPasteboard.PasteboardType.tiff.rawValue].contains($0.type) }) {
             kind = .image
             title = "图片"
-            if let source = CGImageSourceCreateWithData(picture.data as CFData, nil) {
+            if let source = CGImageSourceCreateWithData(picture.data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) {
                 if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                    let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int {
                     title = "\(width) × \(height)"
                 }
                 let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 560, kCGImageSourceCreateThumbnailWithTransform: true]
+                    kCGImageSourceThumbnailMaxPixelSize: ClipImageDecoder.thumbnailPixelSize,
+                    kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true]
                 if let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
                     thumbnail = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
                 }

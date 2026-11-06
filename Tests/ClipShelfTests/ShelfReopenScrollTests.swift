@@ -73,4 +73,54 @@ import Testing
             try await settle(hosting)
         }
     }
+
+    @Test func releasingShelfContentDestroysItsViewsAndReopeningRestoresNavigation() async throws {
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try ClipboardStore(dataDirectory: directory, monitorsClipboard: false)
+        for index in 0..<25 {
+            let text = "test \(index)"
+            try store.database.save(ClipDraft(kind: .text, title: text, text: text,
+                sourceName: "Test", sourceBundle: "test.app",
+                payload: ClipPayload(items: [[ClipRepresentation(type: "public.utf8-plain-text", data: Data(text.utf8))]])))
+        }
+        try store.reload()
+        let search = SearchInputController()
+        let panel = ShelfPanel(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 470),
+            styleMask: .borderless, backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        defer { panel.releaseContent(); panel.close() }
+        var mounts = 0
+        for _ in 0..<3 {
+            store.prepareToShow()
+            panel.mountContentIfNeeded {
+                mounts += 1
+                return ShelfView(store: store, searchInput: search, paste: { _, _ in },
+                    copy: { _ in }, showSettings: {}, dismiss: {})
+            }
+            panel.mountContentIfNeeded { Text("must not replace the shelf") }
+            #expect(panel.hasShelfContent)
+            weak var previousContent = panel.contentView
+            do {
+                let content = try #require(panel.contentView)
+                try await settle(content)
+                let scroll = try #require(scrollViews(in: content).max {
+                    ($0.documentView?.frame.width ?? 0) < ($1.documentView?.frame.width ?? 0)
+                })
+                #expect(abs(scroll.contentView.bounds.minX) < 1)
+                #expect(search.field?.window === panel)
+                store.moveSelection(1)
+                #expect(store.selectedID == store.records[1].id)
+                scroll.contentView.scroll(to: NSPoint(x: 1200, y: 0))
+            }
+            panel.releaseContent()
+            store.releaseTransientResources()
+            try await Task.sleep(nanoseconds: 100_000_000)
+            #expect(!panel.hasShelfContent)
+            #expect(previousContent == nil)
+            #expect(search.field == nil)
+        }
+        #expect(mounts == 3)
+    }
 }

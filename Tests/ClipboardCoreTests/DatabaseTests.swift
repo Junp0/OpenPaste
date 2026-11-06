@@ -134,4 +134,23 @@ import CSQLite
         #expect(throws: DatabaseError.self) { try database.markUsed(id: id) }
         #expect(try database.records().isEmpty)
     }
+
+    @Test func testMetadataLoadingSkipsThumbnailBlobsWithoutChangingStoredContent() throws {
+        let thumbnail = Data(repeating: 42, count: 128 * 1024)
+        var original = draft("image")
+        original.kind = .image
+        original.thumbnail = thumbnail
+        let id = try database.save(original)
+        let metadata = try #require(database.records(includeThumbnails: false).first)
+        #expect(metadata.id == id)
+        #expect(metadata.thumbnail == nil)
+        #expect(metadata.text == original.text)
+        #expect(try database.thumbnail(for: id) == thumbnail)
+        #expect(try database.records().first?.thumbnail == thumbnail)
+        #expect(try database.payload(for: id) == original.payload)
+        let textID = try database.save(draft("no thumbnail"))
+        #expect(try database.thumbnail(for: textID) == nil)
+        try database.delete(id: id)
+        #expect(throws: DatabaseError.self) { try database.thumbnail(for: id) }
+    }
 }

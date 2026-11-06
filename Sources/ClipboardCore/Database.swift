@@ -122,8 +122,11 @@ public final class ClipboardDatabase {
         return id
     }
 
-    public func records() throws -> [ClipRecord] {
-        let statement = try prepare("SELECT id, kind, title, text, source_name, source_bundle, created_at, updated_at, thumbnail, byte_count, favorite, collection_id FROM clips ORDER BY updated_at DESC, id DESC")
+    public func records(includeThumbnails: Bool = true) throws -> [ClipRecord] {
+        // The shelf only needs images for cards that actually appear onscreen.
+        // Exclude the BLOB in SQL so SQLite and Swift never materialize it here.
+        let thumbnailColumn = includeThumbnails ? "thumbnail" : "NULL"
+        let statement = try prepare("SELECT id, kind, title, text, source_name, source_bundle, created_at, updated_at, \(thumbnailColumn), byte_count, favorite, collection_id FROM clips ORDER BY updated_at DESC, id DESC")
         defer { sqlite3_finalize(statement) }
         var records: [ClipRecord] = []
         var step = sqlite3_step(statement)
@@ -138,6 +141,16 @@ public final class ClipboardDatabase {
         }
         guard step == SQLITE_DONE else { throw error() }
         return records
+    }
+
+    public func thumbnail(for id: String) throws -> Data? {
+        let statement = try prepare("SELECT thumbnail FROM clips WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        bind(id, at: 1, to: statement)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { throw DatabaseError.missingItem }
+        guard step == SQLITE_ROW else { throw error() }
+        return blob(statement, 0)
     }
 
     public func payload(for id: String) throws -> ClipPayload {
