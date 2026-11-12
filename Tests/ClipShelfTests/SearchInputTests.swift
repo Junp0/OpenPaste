@@ -1,6 +1,7 @@
 import AppKit
 import Testing
 import SwiftUI
+import ClipboardCore
 @testable import ClipShelf
 
 @Suite @MainActor struct SearchInputTests {
@@ -51,6 +52,65 @@ import SwiftUI
             for code: UInt16 in [123, 124, 125, 126] {
                 #expect(!SearchKeyRouting.shouldFocusSearch(try event(code, ""), isEditing: false))
                 #expect(field.window?.firstResponder === field.window)
+            }
+        }
+    }
+    @Test func horizontalArrowsNavigateFilteredResultsFromFocusedSearch() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try ClipboardStore(dataDirectory: directory, monitorsClipboard: false)
+        for (index, text) in ["匹配一", "其他内容", "匹配二"].enumerated() {
+            _ = try store.database.save(ClipDraft(kind: .text, title: text, text: text,
+                sourceName: "Test", sourceBundle: "test.app",
+                payload: ClipPayload(items: [[ClipRepresentation(type: "public.utf8-plain-text", data: Data(text.utf8))]])),
+                now: Date().addingTimeInterval(Double(index)))
+        }
+        try store.reload()
+        store.query = "匹配"
+        let results = store.visibleRecords.map(\.id)
+        try #require(results.count == 2)
+        try withField { input, field in
+            field.stringValue = store.query
+            for (code, expected): (UInt16, String) in [(124, results[1]), (124, results[1]), (123, results[0]), (123, results[0])] {
+                #expect(input.focus(caretAtEnd: true))
+                #expect(field.currentEditor() != nil)
+                let offset = try #require(ShelfPanelKeyAction.cardSelectionOffset(try event(code, "")))
+                input.blur()
+                store.moveSelection(offset)
+                #expect(store.selectedID == expected)
+                #expect(field.window?.firstResponder === field.window)
+                #expect(field.stringValue == "匹配")
+                #expect(store.query == "匹配")
+            }
+            store.query = "无结果"
+            store.moveSelection(try #require(ShelfPanelKeyAction.cardSelectionOffset(try event(124, ""))))
+            #expect(store.selectedID == nil)
+        }
+    }
+    @Test func modifiedArrowsRemainAvailableForEditingAndGroupShortcuts() throws {
+        for code: UInt16 in [123, 124, 125, 126] {
+            #expect(ShelfPanelKeyAction.cardSelectionOffset(try event(code, "")) == ([123, 126].contains(code) ? -1 : 1))
+            for flags: NSEvent.ModifierFlags in [.command, .option, .control, .shift, [.option, .shift]] {
+                #expect(ShelfPanelKeyAction.cardSelectionOffset(try event(code, "", flags: flags)) == nil)
+            }
+        }
+        #expect(ShelfPanelKeyAction.cardSelectionOffset(try event(0, "a")) == nil)
+    }
+    @Test func returnConfirmsSearchBeforeItCanPasteACard() throws {
+        try withField { input, field in
+            for query in ["筛选", ""] {
+                for code: UInt16 in [36, 76] {
+                    field.stringValue = query
+                    #expect(input.focus(caretAtEnd: true))
+                    let confirm = try event(code, "\r")
+                    #expect(ShelfPanelKeyAction.matching(confirm, shortcut: .standard,
+                        isEditingSearch: field.currentEditor() != nil) == .confirmSearch)
+                    input.blur()
+                    #expect(field.window?.firstResponder === field.window)
+                    #expect(field.stringValue == query)
+                    #expect(ShelfPanelKeyAction.matching(confirm, shortcut: .standard,
+                        isEditingSearch: field.currentEditor() != nil) == nil)
+                }
             }
         }
     }

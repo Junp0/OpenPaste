@@ -446,7 +446,8 @@ extension Notification.Name {
                 return nil
             }
             guard let panel = self.panel, panel.isKeyWindow, panel.attachedSheet == nil else { return event }
-            let panelAction = ShelfPanelKeyAction.matching(event, shortcut: self.store.shortcut)
+            let panelAction = ShelfPanelKeyAction.matching(event, shortcut: self.store.shortcut,
+                isEditingSearch: self.searchInput.field?.currentEditor() != nil)
             if panelAction == .dismiss { self.hidePanel(restoreFocus: true); return nil }
             if self.store.isCreatingCollection { return event }
             let editor = panel.firstResponder as? NSTextView
@@ -480,6 +481,11 @@ extension Notification.Name {
                 if items.indices.contains(number - 1) { self.paste(items[number - 1]) }; return nil
             }
             if event.keyCode == 36 || event.keyCode == 76 {
+                if panelAction == .confirmSearch {
+                    self.searchInput.blur()
+                    panel.makeFirstResponder(panel)
+                    return nil
+                }
                 if let record = self.store.selected { self.paste(record, plainText: command && event.modifierFlags.contains(.shift)) }
                 return nil
             }
@@ -488,10 +494,10 @@ extension Notification.Name {
                 if !event.isARepeat { self.store.delete(record) }
                 return nil
             }
-            if event.keyCode == 125 || event.keyCode == 126 || ((event.keyCode == 123 || event.keyCode == 124) && (!editing || self.store.query.isEmpty)) {
+            if let offset = ShelfPanelKeyAction.cardSelectionOffset(event) {
                 self.searchInput.blur()
                 panel.makeFirstResponder(panel)
-                self.store.moveSelection((event.keyCode == 123 || event.keyCode == 126) ? -1 : 1); return nil
+                self.store.moveSelection(offset); return nil
             }
             if plainSpace, (!editing || self.store.query.isEmpty), let record = self.store.selected {
                 if !event.isARepeat { self.store.previewID = record.id }
