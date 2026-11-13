@@ -72,7 +72,7 @@ def notarize(kind, target, log_dir):
         if os.environ.get("CODE_SIGN_KEYCHAIN"):
             signing += ["--keychain", os.environ["CODE_SIGN_KEYCHAIN"]]
         run(signing + [str(target)])
-    run(["codesign", "--verify", "--deep", "--strict", "-R", requirement, str(target)])
+    run(["codesign", "--verify", "--deep", "--strict", "-R", "=" + requirement, str(target)])
 
     log_dir.mkdir(parents=True, exist_ok=True)
     # Keep the temporary upload separate; truncate each response file before every command.
@@ -116,7 +116,7 @@ def notarize(kind, target, log_dir):
 
     run(["xcrun", "stapler", "staple", str(target)])
     run(["xcrun", "stapler", "validate", str(target)])
-    run(["codesign", "--verify", "--deep", "--strict", "-R", requirement, str(target)])
+    run(["codesign", "--verify", "--deep", "--strict", "-R", "=" + requirement, str(target)])
     if kind == "app":
         run(["spctl", "--assess", "--type", "execute", "--verbose=4", str(target)])
     else:

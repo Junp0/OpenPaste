@@ -105,5 +105,5 @@ codesign --verify --strict "$app_dir"
 if [ "$sign_mode" = developer-id ]; then
     # Verify Apple's Developer ID chain and the intended team, not just the certificate name.
     requirement="anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\""
-    codesign --verify --deep --strict -R "$requirement" "$app_dir"
+    codesign --verify --deep --strict -R "=$requirement" "$app_dir"
 fi

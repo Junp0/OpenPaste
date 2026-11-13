@@ -69,6 +69,11 @@ class NotarizationTests(unittest.TestCase):
         self.assertTrue(self.stapled())
         self.assertEqual(self.calls[-1][:5], ["spctl", "--assess", "--type", "execute", "--verbose=4"])
         self.assertFalse(list((self.root / "logs").glob("*-upload-*")))
+        checks = [call for call in self.calls if call[0] == "codesign" and "-R" in call]
+        self.assertEqual(len(checks), 2)
+        for call in checks:
+            # codesign treats an unprefixed requirement as a filename.
+            self.assertTrue(call[call.index("-R") + 1].startswith("=anchor apple generic"))
 
     def test_dmg_is_signed_before_submission_and_assessed_as_disk_image(self):
         self.invoke("dmg")
