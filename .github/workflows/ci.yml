@@ -35,5 +35,7 @@ jobs:
           plutil -lint Resources/Info.plist
       - name: Run tests
         run: ./scripts/test.sh
+      - name: Check notarization failure handling
+        run: python3 scripts/test-notarization.py
       - name: Build release executable
         run: swift build -c release

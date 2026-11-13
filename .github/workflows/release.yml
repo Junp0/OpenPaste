@@ -15,7 +15,7 @@ jobs:
   release:
     name: Build and publish (macOS arm64)
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -49,8 +49,11 @@ jobs:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
           P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
           CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          for secret_name in BUILD_CERTIFICATE_BASE64 P12_PASSWORD CODE_SIGN_IDENTITY; do
+          for secret_name in BUILD_CERTIFICATE_BASE64 P12_PASSWORD CODE_SIGN_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
             if [ -z "${!secret_name}" ]; then
               echo "::error::Missing repository secret: $secret_name. See docs/DEVELOPMENT.md."
               exit 1
@@ -58,6 +61,10 @@ jobs:
           done
           if [ "$CODE_SIGN_IDENTITY" = '-' ]; then
             echo '::error::CODE_SIGN_IDENTITY must identify a fixed signing certificate.'
+            exit 1
+          fi
+          if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo '::error::APPLE_TEAM_ID must contain 10 uppercase letters/digits.'
             exit 1
           fi
 
@@ -73,22 +80,29 @@ jobs:
           umask 077
           certificate_file="$RUNNER_TEMP/openpaste-signing.p12"
           keychain_file="$RUNNER_TEMP/openpaste-signing.keychain-db"
-          trap 'rm -f "$certificate_file"' EXIT
+          ca_dir="$(mktemp -d "$RUNNER_TEMP/openpaste-ca.XXXXXX")"
+          trap 'rm -f "$certificate_file"; rm -rf "$ca_dir"' EXIT
           keychain_password="$(openssl rand -hex 32)"
           echo "::add-mask::$keychain_password"
           printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$certificate_file"
           security create-keychain -p "$keychain_password" "$keychain_file"
           security set-keychain-settings -lut 21600 "$keychain_file"
           security unlock-keychain -p "$keychain_password" "$keychain_file"
+          # Include Apple's intermediates even when the exported P12 contains only the leaf.
+          for ca_name in DeveloperIDCA DeveloperIDG2CA; do
+            curl --fail --silent --show-error --location --retry 3 \
+              "https://www.apple.com/certificateauthority/$ca_name.cer" -o "$ca_dir/$ca_name.cer"
+            security import "$ca_dir/$ca_name.cer" -k "$keychain_file" >/dev/null
+          done
           security import "$certificate_file" -k "$keychain_file" \
             -P "$P12_PASSWORD" -T /usr/bin/codesign -x >/dev/null
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
             -k "$keychain_password" "$keychain_file" >/dev/null
           # codesign resolves identities through the user keychain search list.
           security list-keychains -d user -s "$keychain_file"
-          identities="$(security find-identity -p codesigning "$keychain_file")"
-          if ! printf '%s\n' "$identities" | grep -Fqi -- "$CODE_SIGN_IDENTITY"; then
-            echo '::error::CODE_SIGN_IDENTITY does not match the certificate/private key in BUILD_CERTIFICATE_BASE64. Copy both Secrets from the same prepared identity.'
+          identities="$(security find-identity -v -p codesigning "$keychain_file")"
+          if ! printf '%s\n' "$identities" | grep -Fi -- "$CODE_SIGN_IDENTITY" | grep -Fq '"Developer ID Application:'; then
+            echo '::error::A valid Apple-issued Developer ID Application identity matching CODE_SIGN_IDENTITY is required. Replace the old self-signed P12 and its password together.'
             exit 1
           fi
 
@@ -96,17 +110,42 @@ jobs:
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
           CODE_SIGN_KEYCHAIN: ${{ runner.temp }}/openpaste-signing.keychain-db
+          CODE_SIGN_MODE: developer-id
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ./scripts/build.sh
 
       - name: Verify signing identity across versions
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
           CODE_SIGN_KEYCHAIN: ${{ runner.temp }}/openpaste-signing.keychain-db
+          CODE_SIGN_MODE: developer-id
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ./scripts/test-signing.sh
+
+      - name: Notarize and staple app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: python3 scripts/notarize-release.py app build/OpenPaste.app
 
       - name: Package and verify release files
         run: |
           ./scripts/package-release.sh
+          (cd release && shasum -a 256 -c SHA256SUMS.txt)
+
+      - name: Sign, notarize and staple DMG
+        env:
+          CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
+          CODE_SIGN_KEYCHAIN: ${{ runner.temp }}/openpaste-signing.keychain-db
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          python3 scripts/notarize-release.py dmg "release/OpenPaste-$version.dmg"
+          # Stapling changes the DMG bytes. Hash the final, stapled deliverables.
+          (cd release && shasum -a 256 "OpenPaste-$version.dmg" "OpenPaste-$version.zip") > release/SHA256SUMS.txt
           (cd release && shasum -a 256 -c SHA256SUMS.txt)
 
       - name: Publish GitHub Release
@@ -123,7 +162,7 @@ jobs:
             --verify-tag \
             --title "OpenPaste $RELEASE_TAG" \
             --generate-notes \
-            --notes 'Apple Silicon (arm64), macOS 13+. Intel is not included. This build is signed but is not Apple-notarized.'
+            --notes 'Apple Silicon (arm64), macOS 13+. Intel is not included. Signed with Developer ID and notarized by Apple; the app and DMG include stapled notarization tickets.'
 
       - name: Remove signing material
         if: ${{ always() }}

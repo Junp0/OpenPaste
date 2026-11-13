@@ -31,5 +31,6 @@ xcuserdata/
 *.pfx
 *.pem
 *.key
+*.p8
 *.mobileprovision
 keychain-password

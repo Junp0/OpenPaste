@@ -3,6 +3,17 @@ set -euo pipefail
 
 app_dir="${1:?用法：sign-app.sh /path/to/OpenPaste.app}"
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_dir/Contents/Info.plist")"
+sign_mode="${CODE_SIGN_MODE:-development}"
+case "$sign_mode" in
+    development) ;;
+    developer-id)
+        if [ -z "${CODE_SIGN_IDENTITY:-}" ] || [[ ! "${APPLE_TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo '错误：Developer ID 发行必须显式指定 CODE_SIGN_IDENTITY 和 10 位 APPLE_TEAM_ID。' >&2
+            exit 1
+        fi
+        ;;
+    *) echo "错误：未知签名模式：$sign_mode" >&2; exit 1 ;;
+esac
 
 # 配置了固定发布身份的开发机与 CI 复用同一证书，避免本机包和发行包交替更换身份。
 # 显式 CODE_SIGN_IDENTITY 始终优先；未配置发布身份的开发机继续沿用原本机证书。
@@ -29,6 +40,9 @@ if [ -n "${CODE_SIGN_IDENTITY:-}" ]; then
         exit 1
     fi
     sign_args=(--force --sign "$CODE_SIGN_IDENTITY" --identifier "$bundle_id")
+    if [ "$sign_mode" = developer-id ]; then
+        sign_args+=(--options runtime --timestamp)
+    fi
     if [ -n "${CODE_SIGN_KEYCHAIN:-}" ]; then
         sign_args+=(--keychain "$CODE_SIGN_KEYCHAIN")
     fi
@@ -88,3 +102,8 @@ CONF
 fi
 
 codesign --verify --strict "$app_dir"
+if [ "$sign_mode" = developer-id ]; then
+    # Verify Apple's Developer ID chain and the intended team, not just the certificate name.
+    requirement="anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\""
+    codesign --verify --deep --strict -R "$requirement" "$app_dir"
+fi
