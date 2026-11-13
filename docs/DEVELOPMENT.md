@@ -125,11 +125,67 @@ CODE_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./scripts/buil
 
 该测试会调用签名脚本，可能创建或解锁本机专用钥匙串，不在普通 CI 中运行。
 
+若开发机存在 `~/Library/Application Support/OpenPaste/ReleaseSigning/`，且其中包含 `OpenPaste-Release.keychain-db`、`keychain-password` 和 `certificate.pem`，默认构建会优先复用这份固定发布身份，以便与 GitHub Release 使用相同证书；显式传入的 `CODE_SIGN_IDENTITY` 优先级更高。发布身份目录存在但不完整时会报错，不回退到旧证书。该目录应仅允许当前用户访问，包含 `identity.p12`、`p12-password` 的完整备份应安全保存，不能提交到仓库。原 `iPaste/CodeSigning/` 目录保留供旧版本恢复使用，配置新的发布身份不会自动重签或替换已安装应用。
+
+辅助功能授权通常可以跨版本保留，前提是应用保持兼容的代码签名身份（designated requirement）和 Bundle ID，并在原位置替换安装。当前自签名应用的身份绑定到证书指纹，因此必须复用原证书；新生成同名证书或改用 Developer ID 证书都不能视为相同身份，已有用户可能需要重新授权一次。用户主动撤销授权、重置隐私设置或系统行为变化也可能导致重新授权，不能保证所有机器永远免授权。签名回归测试验证不同内容的两个版本相互满足签名要求，不会修改真实辅助功能授权，也不替代实际升级测试。身份规则参见 [Apple TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements/)。
+
 ## GitHub 自动检查
 
 [CI 工作流](../.github/workflows/ci.yml)在推送至 `main`、Pull Request 和手动触发时执行：工具链信息、Shell 语法与 plist 检查、Swift Testing 测试、release 编译。
 
 使用 `macos-26` 运行器和只读仓库权限，不需要签名私钥，不运行应用，不创建发行包。运行器标签依据 [GitHub 官方镜像说明](https://github.com/actions/runner-images)，checkout 版本依据 [官方 action](https://github.com/actions/checkout)。远端首次执行结果需在推送后查看 Actions。
+
+## GitHub 标签自动发布
+
+[Release 工作流](../.github/workflows/release.yml)在推送 `v*` 标签时触发，只接受 `v主版本.次版本.修订号`（如 `v0.6.1`），并要求标签版本与 `Resources/Info.plist` 的 `CFBundleShortVersionString` 一致。普通分支推送仍由 CI 检查，不发布 Release。
+
+工作流使用 `macos-26` 的 Apple Silicon 运行器，依次执行版本及 Secrets 校验、自动测试、固定证书导入、签名构建、DMG/ZIP 打包及校验，最后创建正式 GitHub Release，自动生成更新说明并上传：
+
+- `OpenPaste-<版本>.dmg`
+- `OpenPaste-<版本>.zip`
+- `SHA256SUMS.txt`
+
+产物仅包含 arm64 架构，部署目标为 macOS 13+；Intel 和旧系统兼容性仍需实际验证。当前流程不执行 Apple 公证；Release 说明也会标明架构与未公证状态，不能据此宣称已通过 Gatekeeper 的公开分发验证。
+
+### 配置 Secrets
+
+在 GitHub 仓库的 **Settings → Secrets and variables → Actions → New repository secret** 添加以下三个 Secrets：
+
+| Secret 名称 | 内容 |
+| --- | --- |
+| `BUILD_CERTIFICATE_BASE64` | 固定代码签名证书及其私钥导出的 `.p12` 文件的 Base64 内容。 |
+| `P12_PASSWORD` | 导出该 `.p12` 时设置的非空密码。 |
+| `CODE_SIGN_IDENTITY` | 该证书的完整名称，例如 `Developer ID Application: Your Name (TEAMID)`，或证书的 SHA-1 指纹；不能填 `-`。 |
+
+在“钥匙串访问”的“我的证书”中选择证书及关联私钥，导出为带密码的 `.p12`。可用 `security find-identity -v -p codesigning` 查看有效签名身份；推荐为公开发行使用 Developer ID Application 证书。若继续使用本机自签名证书，应导出并复用原证书及私钥，不要为每次发布重新生成身份。自签名证书不具备 Apple 的分发信任。
+
+注意：当前 `sign-app.sh` 创建本机身份时使用 `security import -x`，私钥被设为不可导出；原始临时 `.p12` 和私钥文件随后会删除。若只有这种钥匙串身份且没有原始 `.p12` 备份，就无法生成 `BUILD_CERTIFICATE_BASE64` 和配套 `P12_PASSWORD`。不能只上传 `certificate.pem` 代替含私钥的 `.p12`。保留原签名身份时，需要在持有私钥的 Mac 上签名（例如专用自托管运行器）；云端签名则需要另一份可导出的固定身份，迁移时可能需要现有用户重新授权。仅修改脚本中的 `-x` 无法让已存在的私钥变得可导出。
+
+将导出的文件转换为 Base64 并复制到剪贴板，然后粘贴到 `BUILD_CERTIFICATE_BASE64`：
+
+```sh
+base64 -i /absolute/path/OpenPaste-signing.p12 | pbcopy
+```
+
+临时钥匙串密码由工作流随机生成，不需要 `KEYCHAIN_PASSWORD` Secret。Release 上传使用 GitHub 自动提供的 `github.token` 和工作流声明的 `contents: write` 权限，不需要设置个人访问令牌或额外的 `GH_TOKEN` Secret。当前应用不需要 provisioning profile；此流程也不使用 Apple ID 或公证凭据。证书导入参考 [GitHub 官方指南](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)，Release 创建参考 [GitHub CLI 文档](https://cli.github.com/manual/gh_release_create)。
+
+工作流缺少 Secrets 或签名失败时会停止，不会回退到新生成的本机证书；结束时始终尝试删除临时证书和钥匙串。
+
+签名构建后还会运行 `test-signing.sh`，验证内容不同的两个版本能相互满足 designated requirement，并拒绝临时签名或无效身份。
+
+### 发布版本
+
+1. 更新 `Resources/Info.plist` 的显示版本和构建号，更新 `CHANGELOG.md`，将这些变更与 Release 工作流提交并推送。
+2. 为该提交创建版本标签并单独推送，例如应用版本为 `0.6.1` 时：
+
+   ```sh
+   git tag -a v0.6.1 -m "OpenPaste 0.6.1"
+   git push origin v0.6.1
+   ```
+
+3. 在 GitHub 的 **Actions → Release** 查看运行结果，完成后可在 **Releases** 下载附件。
+
+不支持 `v0.6.1-beta.1` 等预发布标签。版本不匹配时应先修正版本并提交，再创建新的对应标签。发布前失败且没有创建 Release 时，可在 Actions 中选择 **Re-run failed jobs**；若上传中断并留下同标签的草稿 Release，应先检查并删除该草稿后再重跑。已发布的版本应通过新版本号发布更新，不覆盖现有 Release。请直接从本机推送标签；其他工作流用默认 `GITHUB_TOKEN` 推送标签不会触发此发布工作流。
 
 ## 首次推送源码
 
@@ -156,6 +212,6 @@ git commit -m "chore: prepare OpenPaste for open source"
 2. 执行自动测试、release 构建及签名回归，按[测试说明](TESTING.md)检查核心交互。
 3. 使用发行专用 Developer ID 配置完成签名、公证和干净机器验证，不上传私钥。
 4. 检查发行包只包含应用，标明支持的架构、系统范围与未验证项。
-5. 创建对应 Git 标签并将发行包上传 GitHub Releases；源码树中保留生成脚本。
+5. 配置上述 Secrets，创建对应 Git 标签并推送，由 Release 工作流打包上传 GitHub Releases；源码树中保留生成脚本。需要公证的公开发行应先扩展工作流完成第 3 步。
 
 本机构建默认使用当前机器的架构，不代表通用二进制。Intel 和旧系统兼容性需要实际验证后再声明支持范围。

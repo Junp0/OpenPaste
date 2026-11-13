@@ -4,6 +4,24 @@ set -euo pipefail
 app_dir="${1:?用法：sign-app.sh /path/to/OpenPaste.app}"
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_dir/Contents/Info.plist")"
 
+# 配置了固定发布身份的开发机与 CI 复用同一证书，避免本机包和发行包交替更换身份。
+# 显式 CODE_SIGN_IDENTITY 始终优先；未配置发布身份的开发机继续沿用原本机证书。
+release_signing_dir="$HOME/Library/Application Support/OpenPaste/ReleaseSigning"
+if [ -z "${CODE_SIGN_IDENTITY:-}" ] && [ -d "$release_signing_dir" ]; then
+    release_keychain="$release_signing_dir/OpenPaste-Release.keychain-db"
+    release_password_file="$release_signing_dir/keychain-password"
+    release_certificate="$release_signing_dir/certificate.pem"
+    if [ ! -f "$release_keychain" ] || [ ! -s "$release_password_file" ] || [ ! -s "$release_certificate" ]; then
+        echo "错误：固定发布签名身份不完整：$release_signing_dir；请恢复原身份，不会回退到其他证书。" >&2
+        exit 1
+    fi
+    CODE_SIGN_IDENTITY="$(openssl x509 -in "$release_certificate" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
+    CODE_SIGN_KEYCHAIN="$release_keychain"
+    release_keychain_password="$(cat "$release_password_file")"
+    security unlock-keychain -p "$release_keychain_password" "$release_keychain"
+    trap 'security lock-keychain "$release_keychain" >/dev/null 2>&1 || true' EXIT
+fi
+
 # 发布构建可传入 Apple Development / Developer ID 身份；指定失败时绝不回退到临时签名。
 if [ -n "${CODE_SIGN_IDENTITY:-}" ]; then
     if [ "$CODE_SIGN_IDENTITY" = "-" ]; then
