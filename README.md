@@ -35,6 +35,20 @@
 
 ## 快速开始
 
+### 安装发布版本
+
+从 [GitHub Releases](https://github.com/Junp0/OpenPaste/releases/latest) 下载 DMG，打开后将 **OpenPaste.app** 拖入“应用程序”，再从“应用程序”启动。更新时请先退出旧版，再替换安装。目前提供 Apple Silicon 版本。
+
+当前发布包使用固定自签名证书，尚未经过 Apple 公证。首次启动若出现“Apple 无法验证 OpenPaste 是否包含恶意软件”等提示，在确认应用来自本仓库的 Releases 后，可按以下步骤允许打开：
+
+1. 在提示中点“完成”，打开 **系统设置 → 隐私与安全性**。
+2. 向下滚动到“安全性”，找到 OpenPaste 被阻止的说明，点 **“仍要打开”**。
+3. 按系统提示确认并点“打开”。
+
+这是 Apple 提供的单个应用例外操作，详见 [Apple 安全打开 App 说明](https://support.apple.com/zh-cn/102445)。自动粘贴还需在 **系统设置 → 隐私与安全性 → 辅助功能** 中允许 OpenPaste。
+
+### 从源码构建
+
 构建需要 **Swift 6.2+、macOS 26+ SDK**（Xcode 26+ 或对应 Command Line Tools）。
 
 ```sh

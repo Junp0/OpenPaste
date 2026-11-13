@@ -143,13 +143,22 @@ CODE_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./scripts/buil
 
 工作流使用 `macos-26` 的 Apple Silicon 运行器，依次执行：
 
-1. 校验版本和六个 Secrets，运行自动测试。
-2. 从 [Apple PKI](https://www.apple.com/certificateauthority/) 加载 Developer ID 中间证书并导入有效的 **Developer ID Application** 身份；拒绝旧的自签名证书、临时签名、过期或不匹配的身份。
-3. 使用 Hardened Runtime 和安全时间戳签名，验证 Apple 证书链、Team ID 及跨版本身份兼容性。
-4. 将应用 ZIP 提交到 Apple 公证服务，等到 `Accepted`，读取公证日志，再给 `.app` 附加并验证票据（staple），执行 Gatekeeper 检查。
-5. 使用带票据的 `.app` 生成 DMG 和 ZIP，因此 ZIP 内的应用也带有公证票据。
-6. 给最终 DMG 做 Developer ID 签名、Apple 公证、票据附加及 Gatekeeper 检查。
-7. 在 DMG 票据附加完成后重新计算 SHA-256，校验最终文件，最后创建正式 GitHub Release 并上传附件。
+1. 校验版本、发布模式和所需 Secrets，运行自动测试。
+2. 导入配置的固定签名证书，校验它与 `CODE_SIGN_IDENTITY` 匹配；不生成新的临时身份。
+3. 签名构建并验证跨版本身份兼容性。
+4. 生成 DMG 和 ZIP，验证签名、挂载后的应用内容及最终 SHA-256 校验和。
+5. 创建正式 GitHub Release 并上传附件，说明签名与公证状态。
+
+**默认使用固定自签名模式**，只需要原来的三个签名 Secrets，不需要付费 Apple 账号。持续复用同一份 `.p12` 和签名身份，保持 Bundle ID 和兼容的签名要求，不要为每次发布重新生成证书。首次从互联网下载时可能出现 Gatekeeper 提示，用户可按 [README 安装说明](../README.md#快速开始)选择“仍要打开”。
+
+发布模式由 Repository Variable **`RELEASE_SIGNING_MODE`** 控制。在 **Settings → Secrets and variables → Actions → Variables** 设置：
+
+| 值 | 行为 |
+| --- | --- |
+| 未设置或 `self-signed` | 固定自签名，使用三个签名 Secrets，跳过 Apple 公证。 |
+| `developer-id` | 使用 Developer ID 签名和 Apple 公证，需要六项 Secrets。 |
+
+变量只接受这两个值，拼写错误会停止发布。启用公证模式后，公证或凭据失败会停止发布，不会降级为自签名。
 
 最终附件为：
 
@@ -157,9 +166,11 @@ CODE_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./scripts/buil
 - `OpenPaste-<版本>.zip`
 - `SHA256SUMS.txt`
 
-产物仅包含 arm64 架构，部署目标为 macOS 13+；Intel 和旧系统兼容性仍需实际验证。只有公证成功且票据、签名及 Gatekeeper 检查全部通过后，才会执行发布步骤。缺少账号或证书配置时不会回退到自签名发行。
+产物仅包含 arm64 架构，部署目标为 macOS 13+；Intel 和旧系统兼容性仍需实际验证。自签名模式的 Release 会明确注明未公证，并链接“仍要打开”的安装说明。
 
-### 准备 Apple 账号和证书
+### 可选：启用 Developer ID 和 Apple 公证
+
+先准备以下 Apple 账号、证书及六项 Secrets，再将 `RELEASE_SIGNING_MODE` 设为 `developer-id`。公证模式会从 [Apple PKI](https://www.apple.com/certificateauthority/) 加载 Developer ID 中间证书，验证有效 Apple 证书链和 Team ID，并启用 Hardened Runtime 与安全时间戳。随后先公证应用并附加票据，再从带票据的应用生成 ZIP 和 DMG；最后签名、公证和附加 DMG 票据，重新计算最终校验和。只有应用和 DMG 的签名、票据及 Gatekeeper 检查全部通过后才会发布。
 
 本流程采用 **Apple ID + App 专用密码** 认证，不需要 App Store Connect API Key：
 
@@ -172,22 +183,22 @@ CODE_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./scripts/buil
 
 ### 配置 Secrets
 
-在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 配置以下六个 Repository Secrets。前三项沿用原来的名称，但必须整组替换为新的 Apple Developer ID 证书资料：
+在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 配置 Repository Secrets。**默认自签名模式只需要前三项，继续使用现有值即可。** 以后启用公证时，再把前三项整组替换为 Apple Developer ID 证书资料，并补充后三项：
 
 | Secret 名称 | 内容 |
 | --- | --- |
-| `BUILD_CERTIFICATE_BASE64` | **Developer ID Application** 证书及私钥导出的 `.p12` 文件的 Base64 内容，替换原自签名证书值。 |
+| `BUILD_CERTIFICATE_BASE64` | 固定签名证书及私钥导出的 `.p12` 文件的 Base64；公证模式必须使用 **Developer ID Application** 证书。 |
 | `P12_PASSWORD` | 导出该 `.p12` 时设置的非空密码。 |
-| `CODE_SIGN_IDENTITY` | 该证书的完整名称，例如 `Developer ID Application: Your Name (TEAMID)`，或证书的 SHA-1 指纹；不能填 `-`。 |
-| `APPLE_ID` | 具有该开发团队公证权限的 Apple 账号登录邮箱。 |
-| `APPLE_TEAM_ID` | 签名证书所属团队的 10 位大写字母/数字 Team ID。 |
-| `APPLE_APP_SPECIFIC_PASSWORD` | Apple 账号生成的 App 专用密码，不是账号主密码。 |
+| `CODE_SIGN_IDENTITY` | 对应证书的完整名称或 SHA-1 指纹；不能填 `-`。 |
+| `APPLE_ID` | 仅公证模式需要：具有开发团队公证权限的 Apple 账号登录邮箱。 |
+| `APPLE_TEAM_ID` | 仅公证模式需要：签名证书所属团队的 10 位大写字母/数字 Team ID。 |
+| `APPLE_APP_SPECIFIC_PASSWORD` | 仅公证模式需要：Apple 账号生成的 App 专用密码，不是账号主密码。 |
 
-可用 `security find-identity -v -p codesigning` 查看有效签名身份，选择与导出的 `.p12` 相对应的 `Developer ID Application: ...` 行，并把名称或 40 位 SHA-1 指纹填入 `CODE_SIGN_IDENTITY`。确保同时备份 `.p12` 及其导出密码；只有 `.cer` 文件不足以在 GitHub 上签名。
+启用公证时，可用 `security find-identity -v -p codesigning` 查看有效签名身份，选择与导出的 `.p12` 相对应的 `Developer ID Application: ...` 行，并把名称或 40 位 SHA-1 指纹填入 `CODE_SIGN_IDENTITY`。确保同时备份 `.p12` 及其导出密码；只有 `.cer` 文件不足以在 GitHub 上签名。
 
-此前准备在 `~/Library/Application Support/OpenPaste/GitHubReleaseSecrets/` 中的文件是旧的自签名身份，不能直接用于 Apple 公证。其原本机证书也不能转成 Apple Developer ID 证书；需要按上述流程向 Apple 申请新证书。本地的旧证书及已安装应用不会因本次工作流修改而自动被替换。
+此前准备在 `~/Library/Application Support/OpenPaste/GitHubReleaseSecrets/` 中的文件可继续用于固定自签名发布。未来接入 Apple 公证时，需要按上述流程申请 Developer ID 证书；自签名证书不能转成 Apple Developer ID 证书。切换工作流模式不会自动替换本地证书或已安装应用。
 
-将导出的文件转换为 Base64 并复制到剪贴板，然后粘贴到 `BUILD_CERTIFICATE_BASE64`：
+需要更换证书时，将导出的文件转换为 Base64 并复制到剪贴板，然后粘贴到 `BUILD_CERTIFICATE_BASE64`：
 
 ```sh
 base64 -i /absolute/path/OpenPaste-Developer-ID.p12 | pbcopy
@@ -219,7 +230,7 @@ base64 -i /absolute/path/OpenPaste-Developer-ID.p12 | pbcopy
 
 不支持 `v0.6.1-beta.1` 等预发布标签。版本不匹配时应先修正版本并提交，再创建新的对应标签。发布前失败且没有创建 Release 时，可在 Actions 中选择 **Re-run failed jobs**；若上传中断并留下同标签的草稿 Release，应先检查并删除该草稿后再重跑。已发布的版本应通过新版本号发布更新，不覆盖现有 Release。请直接从本机推送标签；其他工作流用默认 `GITHUB_TOKEN` 推送标签不会触发此发布工作流。
 
-已经发布的 `0.6.1` 仍是自签名、未公证的历史版本。配置新凭据不会改变其附件；应使用新版本号发布 Developer ID 版本。首次从自签名迁移到 Developer ID 后，已有用户可能需要重新授予一次辅助功能权限；后续保持兼容身份和安装位置，正常升级通常会保留授权。本机开发包若仍使用旧自签名身份，反复与正式版互相替换也可能重新触发授权。
+已经发布的 `0.6.1` 使用固定自签名证书，后续自签名发布继续复用这一身份。未来迁移 Developer ID 时应使用新版本号发布，已有用户可能需要重新授予一次辅助功能权限；后续保持兼容身份和安装位置，正常升级通常会保留授权。本机开发包若仍使用不同的自签名身份，反复与正式版互相替换也可能重新触发授权。
 
 ## 首次推送源码
 
@@ -238,14 +249,14 @@ git commit -m "chore: prepare OpenPaste for open source"
 
 ## 应用发行
 
-本机构建默认可使用开发签名。标签 Release 流程使用 Developer ID、Hardened Runtime、安全时间戳、公证、staple 和 Gatekeeper 验证；需要先准备有效 Apple 账号、证书及上述六项 Secrets。真实 Apple 服务验证必须在这些凭据就绪后完成，模拟测试不能代替首次真实公证和干净机器安装测试。
+本机构建和标签 Release 默认使用固定自签名。可通过 `RELEASE_SIGNING_MODE=developer-id` 启用 Developer ID、Hardened Runtime、安全时间戳、公证、staple 和 Gatekeeper 验证；需要先准备有效 Apple 账号、证书及六项 Secrets。真实 Apple 服务验证必须在凭据就绪后完成，模拟测试不能代替首次真实公证和干净机器安装测试。
 
 发布前应完成：
 
 1. 同步 `Resources/Info.plist` 的显示版本和构建号，更新[版本记录](../CHANGELOG.md)。
 2. 执行自动测试、release 构建及签名回归，按[测试说明](TESTING.md)检查核心交互。
-3. 使用发行专用 Developer ID 配置完成签名、公证和干净机器验证，不上传私钥。
+3. 自签名模式保留固定身份并检查“仍要打开”的安装体验；公证模式使用发行专用 Developer ID 配置完成公证和干净机器验证，不上传私钥。
 4. 检查发行包只包含应用，标明支持的架构、系统范围与未验证项。
-5. 配置上述 Secrets，创建对应 Git 标签并推送，由 Release 工作流完成签名、公证、打包并上传 GitHub Releases；源码树中保留生成脚本。
+5. 配置所选模式及对应 Secrets，创建 Git 标签并推送，由 Release 工作流签名、按模式公证、打包并上传 GitHub Releases；源码树中保留生成脚本。
 
 本机构建默认使用当前机器的架构，不代表通用二进制。Intel 和旧系统兼容性需要实际验证后再声明支持范围。

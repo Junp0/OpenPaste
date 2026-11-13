@@ -16,6 +16,8 @@ jobs:
     name: Build and publish (macOS arm64)
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      RELEASE_SIGNING_MODE: ${{ vars.RELEASE_SIGNING_MODE || 'self-signed' }}
     defaults:
       run:
         shell: bash
@@ -53,7 +55,15 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          for secret_name in BUILD_CERTIFICATE_BASE64 P12_PASSWORD CODE_SIGN_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+          case "$RELEASE_SIGNING_MODE" in
+            self-signed|developer-id) ;;
+            *) echo '::error::RELEASE_SIGNING_MODE must be self-signed or developer-id.'; exit 1 ;;
+          esac
+          required_secrets=(BUILD_CERTIFICATE_BASE64 P12_PASSWORD CODE_SIGN_IDENTITY)
+          if [ "$RELEASE_SIGNING_MODE" = developer-id ]; then
+            required_secrets+=(APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD)
+          fi
+          for secret_name in "${required_secrets[@]}"; do
             if [ -z "${!secret_name}" ]; then
               echo "::error::Missing repository secret: $secret_name. See docs/DEVELOPMENT.md."
               exit 1
@@ -63,7 +73,7 @@ jobs:
             echo '::error::CODE_SIGN_IDENTITY must identify a fixed signing certificate.'
             exit 1
           fi
-          if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+          if [ "$RELEASE_SIGNING_MODE" = developer-id ] && [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
             echo '::error::APPLE_TEAM_ID must contain 10 uppercase letters/digits.'
             exit 1
           fi
@@ -88,29 +98,39 @@ jobs:
           security create-keychain -p "$keychain_password" "$keychain_file"
           security set-keychain-settings -lut 21600 "$keychain_file"
           security unlock-keychain -p "$keychain_password" "$keychain_file"
-          # Include Apple's intermediates even when the exported P12 contains only the leaf.
-          for ca_name in DeveloperIDCA DeveloperIDG2CA; do
-            curl --fail --silent --show-error --location --retry 3 \
-              "https://www.apple.com/certificateauthority/$ca_name.cer" -o "$ca_dir/$ca_name.cer"
-            security import "$ca_dir/$ca_name.cer" -k "$keychain_file" >/dev/null
-          done
+          if [ "$RELEASE_SIGNING_MODE" = developer-id ]; then
+            # Include Apple's intermediates even when the exported P12 contains only the leaf.
+            for ca_name in DeveloperIDCA DeveloperIDG2CA; do
+              curl --fail --silent --show-error --location --retry 3 \
+                "https://www.apple.com/certificateauthority/$ca_name.cer" -o "$ca_dir/$ca_name.cer"
+              security import "$ca_dir/$ca_name.cer" -k "$keychain_file" >/dev/null
+            done
+          fi
           security import "$certificate_file" -k "$keychain_file" \
             -P "$P12_PASSWORD" -T /usr/bin/codesign -x >/dev/null
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
             -k "$keychain_password" "$keychain_file" >/dev/null
           # codesign resolves identities through the user keychain search list.
           security list-keychains -d user -s "$keychain_file"
-          identities="$(security find-identity -v -p codesigning "$keychain_file")"
-          if ! printf '%s\n' "$identities" | grep -Fi -- "$CODE_SIGN_IDENTITY" | grep -Fq '"Developer ID Application:'; then
-            echo '::error::A valid Apple-issued Developer ID Application identity matching CODE_SIGN_IDENTITY is required. Replace the old self-signed P12 and its password together.'
-            exit 1
+          if [ "$RELEASE_SIGNING_MODE" = developer-id ]; then
+            identities="$(security find-identity -v -p codesigning "$keychain_file")"
+            if ! printf '%s\n' "$identities" | grep -Fi -- "$CODE_SIGN_IDENTITY" | grep -Fq '"Developer ID Application:'; then
+              echo '::error::A valid Apple-issued Developer ID Application identity matching CODE_SIGN_IDENTITY is required. Replace the old self-signed P12 and its password together.'
+              exit 1
+            fi
+          else
+            identities="$(security find-identity -p codesigning "$keychain_file")"
+            if ! printf '%s\n' "$identities" | grep -Fqi -- "$CODE_SIGN_IDENTITY"; then
+              echo '::error::CODE_SIGN_IDENTITY does not match the certificate/private key in BUILD_CERTIFICATE_BASE64.'
+              exit 1
+            fi
           fi
 
       - name: Build signed app
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
           CODE_SIGN_KEYCHAIN: ${{ runner.temp }}/openpaste-signing.keychain-db
-          CODE_SIGN_MODE: developer-id
+          CODE_SIGN_MODE: ${{ env.RELEASE_SIGNING_MODE == 'developer-id' && 'developer-id' || 'development' }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ./scripts/build.sh
 
@@ -118,11 +138,12 @@ jobs:
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
           CODE_SIGN_KEYCHAIN: ${{ runner.temp }}/openpaste-signing.keychain-db
-          CODE_SIGN_MODE: developer-id
+          CODE_SIGN_MODE: ${{ env.RELEASE_SIGNING_MODE == 'developer-id' && 'developer-id' || 'development' }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ./scripts/test-signing.sh
 
       - name: Notarize and staple app
+        if: ${{ env.RELEASE_SIGNING_MODE == 'developer-id' }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -135,6 +156,7 @@ jobs:
           (cd release && shasum -a 256 -c SHA256SUMS.txt)
 
       - name: Sign, notarize and staple DMG
+        if: ${{ env.RELEASE_SIGNING_MODE == 'developer-id' }}
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.CODE_SIGN_IDENTITY }}
           CODE_SIGN_KEYCHAIN: ${{ runner.temp }}/openpaste-signing.keychain-db
@@ -155,6 +177,11 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           version="${RELEASE_TAG#v}"
+          if [ "$RELEASE_SIGNING_MODE" = developer-id ]; then
+            notes='Apple Silicon (arm64), macOS 13+. Intel is not included. Signed with Developer ID and notarized by Apple; the app and DMG include stapled notarization tickets.'
+          else
+            notes='Apple Silicon (arm64), macOS 13+. Intel is not included. Signed with a fixed self-signed certificate; not notarized by Apple. If macOS blocks opening, follow the Open Anyway instructions in README: https://github.com/Junp0/OpenPaste#快速开始'
+          fi
           gh release create "$RELEASE_TAG" \
             "release/OpenPaste-$version.dmg" \
             "release/OpenPaste-$version.zip" \
@@ -162,7 +189,7 @@ jobs:
             --verify-tag \
             --title "OpenPaste $RELEASE_TAG" \
             --generate-notes \
-            --notes 'Apple Silicon (arm64), macOS 13+. Intel is not included. Signed with Developer ID and notarized by Apple; the app and DMG include stapled notarization tickets.'
+            --notes "$notes"
 
       - name: Remove signing material
         if: ${{ always() }}
