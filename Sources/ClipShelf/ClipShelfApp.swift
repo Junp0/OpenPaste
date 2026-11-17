@@ -64,7 +64,7 @@ extension Notification.Name {
     private let showsWindows: Bool
     private var store: ClipboardStore!
     private var panel: ShelfPanel?
-    private var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
     private var returnToSettingsAfterPanel = false
     private var previewingDisplaySize = false
@@ -263,7 +263,8 @@ extension Notification.Name {
         }
     }
     private func configureStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        self.statusItem = statusItem
         if let button = statusItem.button {
             button.image = IPasteLogo.mark
             button.target = self; button.action = #selector(statusClicked(_:))
@@ -284,6 +285,7 @@ extension Notification.Name {
         updateStatus()
     }
     @objc private func statusClicked(_ sender: Any?) {
+        guard let statusItem else { return }
         if NSApp.currentEvent?.type == .rightMouseUp {
             let menu = NSMenu()
             menu.addItem(withTitle: "打开OpenPaste  \(store.shortcutLabel)", action: #selector(openFromMenu), keyEquivalent: "")
@@ -410,10 +412,10 @@ extension Notification.Name {
         panelClickMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
             guard let self, let panel = self.panel, self.panelShouldBeVisible, panel.attachedSheet == nil,
                   self.store.draggedRecordID == nil, self.menuTrackingDepth == 0 else { return event }
-            // The status button already toggles the panel in its own action.
-            if event.window === self.statusItem.button?.window { return event }
             let insideWindow = self.previewingDisplaySize ? self.settingsWindow : panel
-            if event.window !== insideWindow { self.hidePanel() }
+            if ShelfPanelClickAction.shouldDismiss(event, inside: insideWindow, statusItem: self.statusItem) {
+                self.hidePanel()
+            }
             return event
         }
         // Local monitors do not receive clicks on the desktop or in other apps.
