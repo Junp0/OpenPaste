@@ -9,6 +9,10 @@ import Darwin
         signal(SIGPIPE, SIG_IGN)
         let arguments = CommandLine.arguments
         if arguments.dropFirst().first == "--capture-worker" { CaptureWorker.run(); return }
+        if arguments.dropFirst().first == "--install-update" {
+            UpdateInstaller.runHelper(arguments: Array(arguments.dropFirst(2)))
+            return
+        }
         let application = NSApplication.shared
         let delegate: NSObject
         if arguments.dropFirst().first == "--shelf-interface" {
@@ -66,6 +70,7 @@ extension Notification.Name {
     private var panel: ShelfPanel?
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private let updateChecker = UpdateChecker()
     private var returnToSettingsAfterPanel = false
     private var previewingDisplaySize = false
     private var recordingShortcut = false
@@ -92,6 +97,19 @@ extension Notification.Name {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        updateChecker.handoff = { [weak self] id, version in
+            guard let self else { throw UpdateInstallError.cannotStartHelper }
+            if let connection = self.connection {
+                var request = InterfaceMessage(.installUpdate)
+                request.updateStage = id
+                request.updateVersion = version.description
+                guard let reply = connection.request(request) else { throw UpdateInstallError.unconfirmedHandoff }
+                guard reply.flag == true else { throw UpdateInstallError.cannotStartHelper }
+            } else {
+                try UpdateInstaller.startHelper(id: id, version: version, childPIDs: [])
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+        }
         do { store = try ClipboardStore(monitorsClipboard: connection == nil) }
         catch {
             let alert = NSAlert(); alert.messageText = "无法打开OpenPaste"; alert.informativeText = error.localizedDescription
@@ -146,6 +164,7 @@ extension Notification.Name {
         installOutsideClickHandling()
         switch initialAction {
         case .settings: openSettings()
+        case .checkForUpdates: checkForUpdates()
         case .about: NSApp.orderFrontStandardAboutPanel(nil)
         default: showPanel()
         }
@@ -174,6 +193,7 @@ extension Notification.Name {
         case .toggle:
             store.reloadPreferences(); store.perform { try store.reload() }; togglePanel()
         case .settings: store.reloadPreferences(); openSettings()
+        case .checkForUpdates: checkForUpdates()
         case .about: hidePanel(animated: false); NSApp.orderFrontStandardAboutPanel(nil)
         case .historyChanged: store.perform { try store.reload() }
         case .preferencesChanged: store.reloadPreferences()
@@ -196,6 +216,8 @@ extension Notification.Name {
         applicationMenu.addItem(withTitle: "关于OpenPaste", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         let settings = applicationMenu.addItem(withTitle: "设置…", action: #selector(settingsFromMenu), keyEquivalent: ",")
         settings.target = self
+        let updates = applicationMenu.addItem(withTitle: "检查更新…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
         applicationMenu.addItem(.separator())
         let quitItem = applicationMenu.addItem(withTitle: "退出OpenPaste", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -292,6 +314,7 @@ extension Notification.Name {
             menu.addItem(withTitle: store.paused ? "继续记录" : "暂停记录", action: #selector(togglePause), keyEquivalent: "")
             menu.addItem(.separator())
             menu.addItem(withTitle: "设置…", action: #selector(settingsFromMenu), keyEquivalent: ",")
+            menu.addItem(withTitle: "检查更新…", action: #selector(checkForUpdates), keyEquivalent: "")
             menu.addItem(withTitle: "退出OpenPaste", action: #selector(quit), keyEquivalent: "q")
             for item in menu.items { item.target = self }
             statusItem.menu = menu; statusItem.button?.performClick(nil); statusItem.menu = nil
@@ -300,6 +323,7 @@ extension Notification.Name {
     @objc private func openFromMenu() { showPanel() }
     @objc private func togglePause() { store.paused.toggle() }
     @objc private func settingsFromMenu() { openSettings() }
+    @objc private func checkForUpdates() { openSettings(); updateChecker.check() }
     @objc private func quit() {
         if let connection { connection.send(InterfaceMessage(.quit)) }
         else { NSApp.terminate(nil) }
@@ -394,6 +418,7 @@ extension Notification.Name {
     }
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow, window === settingsWindow else { return }
+        updateChecker.cancel()
         if previewingDisplaySize { hidePanel(animated: false) }
         window.contentView = nil
         settingsWindow = nil
@@ -586,7 +611,7 @@ extension Notification.Name {
             window.hidesOnDeactivate = false
             window.canHide = false
             window.delegate = self
-            window.contentView = NSHostingView(rootView: PreferencesView(store: store))
+            window.contentView = NSHostingView(rootView: PreferencesView(store: store, updateChecker: updateChecker))
             window.center(); settingsWindow = window
         }
         if showsWindows {

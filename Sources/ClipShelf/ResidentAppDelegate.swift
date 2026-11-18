@@ -71,6 +71,7 @@ import Darwin
             ("打开OpenPaste  \(shortcut.displayLabel)", #selector(openShelf)),
             (monitor.paused ? "继续记录" : "暂停记录", #selector(togglePause)),
             ("设置…", #selector(openSettings)),
+            ("检查更新…", #selector(checkForUpdates)),
             ("关于OpenPaste", #selector(openAbout)),
             ("退出OpenPaste", #selector(quit))
         ] {
@@ -81,6 +82,7 @@ import Darwin
     }
     @objc private func openShelf() { present(.show) }
     @objc private func openSettings() { present(.settings) }
+    @objc private func checkForUpdates() { present(.checkForUpdates) }
     @objc private func openAbout() { present(.about) }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func togglePause() {
@@ -160,6 +162,7 @@ import Darwin
     }
 
     private func receive(_ message: InterfaceMessage, from link: InterfaceConnection) {
+        guard !isTerminating else { return }
         switch message.kind {
         case .preferencesChanged: reloadPreferences()
         case .shortcut:
@@ -180,6 +183,21 @@ import Darwin
             let canExit = ProcessInfo.processInfo.systemUptime - lastPresentation > 0.3
             if canExit { interfaceEnding = true }
             link.send(InterfaceMessage(.reply, id: message.id, flag: canExit))
+        case .installUpdate:
+            guard message.id != nil, let stage = message.updateStage,
+                  let version = message.updateVersion.flatMap(ReleaseVersion.init) else { return }
+            do {
+                let children = [interfaceProcess, captureProcess].compactMap { process -> pid_t? in
+                    guard let process, process.isRunning else { return nil }
+                    return process.processIdentifier
+                }
+                try UpdateInstaller.startHelper(id: stage, version: version, childPIDs: children)
+                isTerminating = true
+                link.send(InterfaceMessage(.reply, id: message.id, flag: true))
+                NSApp.terminate(nil)
+            } catch {
+                link.send(InterfaceMessage(.reply, id: message.id, flag: false))
+            }
         case .quit: NSApp.terminate(nil)
         default: break
         }

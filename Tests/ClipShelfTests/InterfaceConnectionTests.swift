@@ -70,7 +70,7 @@ import Testing
             if complete { delivered.signal() }
         }
         receiver.start()
-        let expected = [InterfaceMessage(.show, id: "中文\n换行"), InterfaceMessage(.settings), InterfaceMessage(.prepareExit)]
+        let expected = [InterfaceMessage(.show, id: "中文\n换行"), InterfaceMessage(.checkForUpdates), InterfaceMessage(.prepareExit)]
         var data = Data()
         for message in expected {
             data.append(try JSONEncoder().encode(message)); data.append(10)

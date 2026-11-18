@@ -82,7 +82,7 @@ import Testing
             weak var oldWindow = window
             weak var oldContent: NSView?
             autoreleasepool {
-                let content = NSHostingView(rootView: PreferencesView(store: store))
+                let content = NSHostingView(rootView: PreferencesView(store: store, updateChecker: UpdateChecker()))
                 window?.contentView = content
                 content.layoutSubtreeIfNeeded()
                 oldContent = content

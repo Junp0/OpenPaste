@@ -6,6 +6,7 @@ import ServiceManagement
 
 struct PreferencesView: View {
     @ObservedObject var store: ClipboardStore
+    @ObservedObject var updateChecker: UpdateChecker
     @ViewState<Bool> private var trusted = AXIsProcessTrusted()
     @ViewState<Bool> private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @ViewState<Bool> private var clearConfirmation = false
@@ -15,6 +16,14 @@ struct PreferencesView: View {
     private var appVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发版" }
 
     var body: some View {
+        ScrollViewReader { scroll in
+            preferencesForm.onChange(of: updateChecker.isChecking) { checking in
+                if checking { scroll.scrollTo("softwareUpdates", anchor: .top) }
+            }
+        }
+    }
+
+    private var preferencesForm: some View {
         Form {
             Section {
                 HStack(spacing: 13) {
@@ -28,6 +37,7 @@ struct PreferencesView: View {
                     }
                 }.padding(.vertical, 6)
             }
+            UpdateSettingsView(checker: updateChecker).id("softwareUpdates")
             Section("常规") {
                 Toggle("记录剪贴板", isOn: Binding(get: { !store.paused }, set: { store.paused = !$0 }))
                 Picker("面板与卡片大小", selection: $store.displaySize) {

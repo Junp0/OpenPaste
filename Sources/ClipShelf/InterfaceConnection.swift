@@ -5,15 +5,17 @@ import Darwin
 /// No network listener, distributed notification, or clipboard content is used.
 struct InterfaceMessage: Codable, Equatable {
     enum Kind: String, Codable {
-        case show, toggle, settings, about, shutdown, historyChanged, preferencesChanged
+        case show, toggle, settings, checkForUpdates, about, shutdown, historyChanged, preferencesChanged
         case shortcut, cancelShortcut, recordingShortcut, beginRestore, endRestore, quit
-        case prepareExit, reply
+        case prepareExit, installUpdate, reply
     }
     let kind: Kind
     var id: String?
     var shortcut: ShelfShortcut?
     var flag: Bool?
     var changeCount: Int?
+    var updateStage: UUID?
+    var updateVersion: String?
 
     init(_ kind: Kind, id: String? = nil, shortcut: ShelfShortcut? = nil,
          flag: Bool? = nil, changeCount: Int? = nil) {
