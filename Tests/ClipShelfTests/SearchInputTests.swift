@@ -160,25 +160,33 @@ import ClipboardCore
             editor.unmarkText()
         }
     }
-    @Test func placeholderHidesDuringIMECompositionWithoutChangingTheSearch() throws {
+    @Test func nativeEditingHidesPlaceholderBeforeCompositionCommits() throws {
         try withField { input, field in
             var query = ""
             field.stringValue = ""
             let placeholder = NSTextField(labelWithString: "搜索")
             let coordinator = SearchInput.Coordinator(text: Binding(get: { query }, set: { query = $0 }))
             coordinator.placeholder = placeholder
-            #expect(input.focus())
-            let editor = try #require(field.currentEditor() as? NSTextView)
+            field.delegate = coordinator
             coordinator.updatePlaceholder(field)
             #expect(!placeholder.isHidden)
-            editor.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
-            coordinator.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+            #expect(input.focus())
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            // Use the native editing lifecycle; do not manufacture delegate
+            // callbacks, which can hide missing notifications during IME input.
+            editor.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0),
+                replacementRange: NSRange(location: NSNotFound, length: 0))
             #expect(placeholder.isHidden)
             #expect(query.isEmpty)
             #expect(editor.hasMarkedText())
-            editor.unmarkText()
-            editor.string = ""; field.stringValue = ""
-            coordinator.updatePlaceholder(field)
+            editor.insertText("你", replacementRange: NSRange(location: NSNotFound, length: 0))
+            #expect(placeholder.isHidden)
+            editor.selectAll(nil)
+            editor.deleteBackward(nil)
+            #expect(placeholder.isHidden)
+            input.blur()
+            #expect(field.stringValue.isEmpty)
+            #expect(query.isEmpty)
             #expect(!placeholder.isHidden)
         }
     }

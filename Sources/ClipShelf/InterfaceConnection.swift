@@ -7,7 +7,7 @@ struct InterfaceMessage: Codable, Equatable {
     enum Kind: String, Codable {
         case show, toggle, settings, checkForUpdates, about, shutdown, historyChanged, preferencesChanged
         case shortcut, cancelShortcut, recordingShortcut, beginRestore, endRestore, quit
-        case prepareExit, installUpdate, reply
+        case prepareExit, installUpdate, interfaceKeyboardFocus, reply
     }
     let kind: Kind
     var id: String?

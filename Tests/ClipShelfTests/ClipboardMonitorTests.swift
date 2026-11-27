@@ -87,4 +87,22 @@ import Testing
             #expect(records.isEmpty)
         }
     }
+
+    @Test func nonactivatingShelfCopiesAreIgnoredUntilKeyboardFocusReturns() throws {
+        try withMonitor { monitor, board in
+            board.clearContents(); board.setString("external", forType: .string)
+            monitor.capturePendingChange(from: board, source: nil)
+            monitor.setInterfaceKeyboardFocus(true)
+            board.clearContents(); board.setString("search query", forType: .string)
+            monitor.capturePendingChange(from: board, source: nil)
+            // Lose focus before polling the last edit; it must not be replayed.
+            board.clearContents(); board.setString("last search edit", forType: .string)
+            monitor.setInterfaceKeyboardFocus(false, changeCount: board.changeCount)
+            monitor.capturePendingChange(from: board, source: nil)
+            board.clearContents(); board.setString("next external", forType: .string)
+            monitor.capturePendingChange(from: board, source: nil)
+            let records = try monitor.database.records()
+            #expect(Set(records.map(\.text)) == ["external", "next external"])
+        }
+    }
 }

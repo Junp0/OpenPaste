@@ -16,6 +16,7 @@ import ClipboardCore
     private var retentionDays = 30
     private var excludedBundles: Set<String> = []
     private var restoringClipboard = false
+    private var interfaceOwnsKeyboard = false
     var onCapture: ((Int) -> Void)?
     var onError: ((String) -> Void)?
     var onLargeRead: (() -> Void)?
@@ -72,9 +73,15 @@ import ClipboardCore
         lastChange = changeCount
         restoringClipboard = false
     }
+    func setInterfaceKeyboardFocus(_ focused: Bool, changeCount: Int? = nil) {
+        // The nonactivating shelf can edit text while another app is frontmost.
+        // Consume its final copy even if focus changes before the next poll.
+        if interfaceOwnsKeyboard, !focused, let changeCount { lastChange = changeCount }
+        interfaceOwnsKeyboard = focused
+    }
     func interfaceDidExit() {
-        if restoringClipboard { lastChange = NSPasteboard.general.changeCount }
-        restoringClipboard = false; reloadPreferences(); prune()
+        if restoringClipboard || interfaceOwnsKeyboard { lastChange = NSPasteboard.general.changeCount }
+        restoringClipboard = false; interfaceOwnsKeyboard = false; reloadPreferences(); prune()
     }
     var targetApplication: NSRunningApplication? {
         let frontmost = NSWorkspace.shared.frontmostApplication
@@ -89,7 +96,7 @@ import ClipboardCore
         guard !restoringClipboard, board.changeCount != lastChange else { return }
         let observedChange = board.changeCount
         lastChange = observedChange
-        guard !paused else { return }
+        guard !paused, !interfaceOwnsKeyboard else { return }
         // The temporary interface has a different PID but the same signed app
         // identity. Its search/settings fields must never enter the history.
         guard !isOwnApplication(source) else { return }

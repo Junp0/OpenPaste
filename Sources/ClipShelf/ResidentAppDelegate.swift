@@ -179,6 +179,9 @@ import Darwin
             link.send(InterfaceMessage(.reply, id: message.id, flag: true))
         case .endRestore:
             if let count = message.changeCount { monitor.endRestore(changeCount: count) }
+        case .interfaceKeyboardFocus:
+            monitor.setInterfaceKeyboardFocus(message.flag == true, changeCount: message.changeCount)
+            if message.id != nil { link.send(InterfaceMessage(.reply, id: message.id, flag: true)) }
         case .prepareExit:
             let canExit = ProcessInfo.processInfo.systemUptime - lastPresentation > 0.3
             if canExit { interfaceEnding = true }

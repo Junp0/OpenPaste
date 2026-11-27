@@ -155,7 +155,7 @@ extension Notification.Name {
         store.onDragEnd = { [weak self] completedInside in
             DispatchQueue.main.async {
                 guard let self, self.panelShouldBeVisible, let panel = self.panel else { return }
-                if completedInside { NSApp.activate(ignoringOtherApps: true); panel.makeKeyAndOrderFront(nil) }
+                if completedInside { panel.makeKeyAndOrderFront(nil) }
                 else if !panel.isKeyWindow { self.hidePanel() }
             }
         }
@@ -234,7 +234,10 @@ extension Notification.Name {
     }
     private func configurePanel() {
         let panel = ShelfPanel(contentRect: NSRect(x: 0, y: 0, width: 1160, height: 440),
-            styleMask: [.borderless, .fullSizeContentView], backing: .buffered, defer: false)
+            // Take keyboard focus independently of application activation. An
+            // activation request can leave typing in the previous secure field.
+            styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.becomesKeyOnlyIfNeeded = false
         panel.isFloatingPanel = true
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) + 1)
         panel.animationBehavior = .none
@@ -369,7 +372,6 @@ extension Notification.Name {
             // Let Settings keep keyboard focus so the user can compare sizes.
             panel.orderFront(nil)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
             panel.makeKeyAndOrderFront(nil)
         }
         panel.contentView?.layoutSubtreeIfNeeded()
@@ -409,7 +411,17 @@ extension Notification.Name {
             }
         }
     }
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let panel, let window = notification.object as? NSWindow, window === panel else { return }
+        // Confirm capture suppression before this nonactivating panel can edit
+        // or copy text while the original application remains frontmost.
+        _ = connection?.request(InterfaceMessage(.interfaceKeyboardFocus, flag: true))
+    }
     func windowDidResignKey(_ notification: Notification) {
+        if let panel, let window = notification.object as? NSWindow, window === panel {
+            connection?.send(InterfaceMessage(.interfaceKeyboardFocus, flag: false,
+                changeCount: NSPasteboard.general.changeCount))
+        }
         // A size selection may temporarily move focus without an outside click.
         // Temporary previews are dismissed by explicit interaction below.
         if previewingDisplaySize { return }
@@ -571,7 +583,9 @@ extension Notification.Name {
             return
         }
         pasteInFlight = true
-        hidePanel()
+        // A nonactivating panel can own keyboard focus while the target app is
+        // already active. Release it before sending paste, not after animation.
+        hidePanel(animated: false)
         targetApplication.activate(options: [])
         sendPaste(whenActive: targetApplication, attempts: 12)
     }

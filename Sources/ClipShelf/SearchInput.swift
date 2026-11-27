@@ -96,10 +96,20 @@ struct SearchInput: NSViewRepresentable {
         var text: Binding<String>
         weak var placeholder: NSTextField?
         init(text: Binding<String>) { self.text = text }
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            // IME marked text may appear without a text-change notification.
+            // Hide before native editing starts, even while the query is empty.
+            placeholder?.isHidden = true
+        }
         func controlTextDidChange(_ notification: Notification) { synchronize(notification) }
-        func controlTextDidEndEditing(_ notification: Notification) { synchronize(notification) }
+        func controlTextDidEndEditing(_ notification: Notification) {
+            synchronize(notification)
+            guard let field = notification.object as? NSTextField else { return }
+            // AppKit can still expose the outgoing editor during this callback.
+            placeholder?.isHidden = !field.stringValue.isEmpty
+        }
         func updatePlaceholder(_ field: NSTextField) {
-            placeholder?.isHidden = !(field.currentEditor()?.string ?? field.stringValue).isEmpty
+            placeholder?.isHidden = field.currentEditor() != nil || !field.stringValue.isEmpty
         }
         private func synchronize(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
